@@ -1,0 +1,27 @@
+{
+  "name": "wt-dash",
+  "version": "0.1.0",
+  "description": "A macOS terminal dashboard for reviewing and cleaning up Git worktrees across repositories.",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64", "x64"],
+  "engines": { "bun": ">=1.3.14" },
+  "bin": { "wt-dash": "src/index.ts" },
+  "files": ["src", "README.md", "LICENSE"],
+  "type": "module",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "build": "bun scripts/build.ts",
+    "formula": "bun scripts/homebrew.ts",
+    "install:local": "sh scripts/install.sh",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.12"
+  }
+}
