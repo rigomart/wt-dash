@@ -4,9 +4,19 @@ A macOS terminal dashboard for reviewing and cleaning up Git worktrees across re
 
 ## Install and run
 
-Supports macOS 13 (Ventura) or newer on Apple Silicon and Intel Macs. Requires Git and [Worktrunk](https://worktrunk.dev/) 0.80.0 or newer. The first release is being prepared; see [release instructions](docs/RELEASING.md) for GitHub downloads and Homebrew packaging.
+Supports macOS 13 (Ventura) or newer on Apple Silicon and Intel Macs. Requires Git and [Worktrunk](https://worktrunk.dev/) 0.80.0 or newer. Homebrew installs both the dashboard and Worktrunk:
 
-To build and install from this source checkout, use [Bun](https://bun.com/) 1.3.14 (the runtime pinned for release builds):
+```sh
+brew install rigomart/tap/wt-dash
+wt-dash --doctor ~/projects
+wt-dash ~/projects
+```
+
+Homebrew ships a prebuilt Worktrunk only for some Macs, such as Apple Silicon on the latest macOS; elsewhere, including all Intel Macs, it compiles Worktrunk from source, which takes a few minutes. Archives for direct download are attached to each [GitHub release](https://github.com/rigomart/wt-dash/releases).
+
+### Build from source
+
+Use [Bun](https://bun.com/) 1.3.14 (the runtime pinned for release builds):
 
 ```sh
 brew install worktrunk

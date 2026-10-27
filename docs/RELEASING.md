@@ -22,11 +22,11 @@ The build produces `dist/wt-dash`, an archive for the current Mac's architecture
 
 ## GitHub release
 
-1. Create a public GitHub repository for this source and configure its remote. This checkout currently has no Git remote.
-2. Ensure `package.json` has the intended version and commit the release changes.
-3. Push a matching tag, such as `v0.1.0`.
-4. The workflow runs tests, type checking, builds, and terminal smoke tests on both architectures. It then creates a **draft** GitHub release with archives, checksums, and `wt-dash.rb`.
-5. Review and publish the draft release.
+1. Ensure `package.json` has the intended version and merge the release changes into `main`.
+2. Push a matching tag, such as `v0.1.0`.
+3. The workflow runs tests, type checking, builds, and terminal smoke tests on both architectures. It then creates a **draft** GitHub release with archives, checksums, and `wt-dash.rb`.
+4. Review and publish the draft release.
+5. Update the Homebrew tap as described below.
 
 The workflow refuses tags whose version differs from `package.json`. Releases use Bun 1.3.14, and the build refuses a different runtime. To change that version, update the build script and workflow, refresh the upstream texts in `licenses/`, and verify both builds. `licenses/bun-1.3.14/sources.json` records the sources used for runtime notices. The application can be rebuilt from this source using a modified Bun 1.3.14 runtime; see Bun's linked-library rebuilding instructions in the notices.
 
@@ -37,16 +37,16 @@ The generated formula declares Worktrunk as a dependency and chooses the archive
 To generate it locally, put both architecture archives into `dist/` and run:
 
 ```sh
-bun run formula YOUR_OWNER/wt-dash
+bun run formula rigomart/wt-dash
 ```
 
-Copy the generated `wt-dash.rb` into the `Formula/` directory of a public `homebrew-tools` repository under your GitHub account. Users can then install the dashboard and Worktrunk together:
+The tap lives at [rigomart/homebrew-tap](https://github.com/rigomart/homebrew-tap). For each release, copy the `wt-dash.rb` attached to the release into its `Formula/` directory. Users then install the dashboard and Worktrunk together:
 
 ```sh
-brew install YOUR_OWNER/tools/wt-dash
+brew install rigomart/tap/wt-dash
 wt-dash --doctor ~/projects
 ```
 
-Replace `YOUR_OWNER` with the actual GitHub owner when publishing the installation instructions. The draft release must be published before Homebrew can download its archives. Run `brew test YOUR_OWNER/tools/wt-dash` after publishing the formula.
+The draft release must be published before Homebrew can download its archives. Run `brew test rigomart/tap/wt-dash` after updating the formula.
 
 The compiled executable is not signed with an Apple Developer identity or notarized. Homebrew is the preferred installation route. For direct downloads, users may need to allow the downloaded executable in macOS Privacy & Security after verifying its origin and checksum. Signing and notarization can be added when an Apple Developer identity is available.
