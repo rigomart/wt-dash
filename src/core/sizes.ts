@@ -99,7 +99,7 @@ export function createSizeService(
       closed = true;
       abort.abort();
       for (const resume of [...uncachedWaiters.splice(0), ...cachedWaiters.splice(0)]) resume();
-      await Promise.allSettled([...tasks]);
+      await Promise.allSettled(tasks);
       await writes;
     },
   };

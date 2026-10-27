@@ -76,7 +76,7 @@ export function fitLine(line: Line, width: number, fill?: Style): Line {
     out.push(fill ? { ...fill, ...item, ...(fill.bg && !item.bg ? { bg: fill.bg } : {}), text } : { ...item, text });
     used += textWidth(text);
   }
-  if (used < width) out.push({ ...(fill ?? {}), text: " ".repeat(width - used) });
+  if (used < width) out.push({ ...fill, text: " ".repeat(width - used) });
   return out;
 }
 

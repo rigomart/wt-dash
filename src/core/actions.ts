@@ -219,7 +219,7 @@ export function createActionService(options: {
     async prepareRemoval(rows) {
       if (pruning) throw new Error("Cleanup is running");
       if (!rows.length) throw new Error("Select at least one worktree");
-      const entries = new Array<RemovalEntry>(rows.length);
+      const entries: RemovalEntry[] = [];
       const repos = [...new Set(rows.map((row) => row.repoPath))];
       let nextRepo = 0;
       async function worker(): Promise<void> {

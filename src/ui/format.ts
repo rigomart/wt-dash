@@ -2,7 +2,7 @@ import { assess } from "../core/assess";
 import type { WorktreeRow } from "../core/types";
 
 export function plain(value: string): string {
-  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+  return value.replace(/\p{Cc}/gu, " ");
 }
 
 export function sizeLabel(kib: number | null): string {

@@ -11,13 +11,15 @@ bun run start -- ~/projects
 Before submitting a change:
 
 ```sh
+bun run lint
+bun run format:check
 bun test
 bun run typecheck
 bun run build
 python3 scripts/smoke-test.py dist/wt-dash
 ```
 
-The smoke test copies the built binary into an isolated folder, creates a temporary repository and worktree, opens the dashboard in a terminal, and quits. GitHub Actions runs all four checks on Apple Silicon and Intel Macs.
+`bun run lint` runs oxlint, and `bun run format` rewrites files with oxfmt. The smoke test copies the built binary into an isolated folder, creates a temporary repository and worktree, opens the dashboard in a terminal, and quits. GitHub Actions runs lint and format checks once, and the other four checks on Apple Silicon and Intel Macs.
 
 Keep the Git assessment and cleanup rules in `src/core`, and terminal interaction in `src/ui`. `src/core` has no terminal dependency, so another interface can reuse its data and rules. For cleanup changes, cover stale confirmations, locks, unfinished Git operations, local changes, and branch retention. Tests must use temporary repositories and never remove the contributor's own worktrees.
 
