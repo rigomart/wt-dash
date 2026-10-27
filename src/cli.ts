@@ -39,20 +39,35 @@ export function parseArgs(args: string[], home: string, cwd: string): CliOptions
   let positional = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
-    if (!positional && arg === "--") { positional = true; continue; }
-    if (!positional && (arg === "--help" || arg === "-h")) { options.mode = "help"; continue; }
-    if (!positional && (arg === "--version" || arg === "-v")) { options.mode = "version"; continue; }
-    if (!positional && arg === "--doctor") { options.mode = "doctor"; continue; }
+    if (!positional && arg === "--") {
+      positional = true;
+      continue;
+    }
+    if (!positional && (arg === "--help" || arg === "-h")) {
+      options.mode = "help";
+      continue;
+    }
+    if (!positional && (arg === "--version" || arg === "-v")) {
+      options.mode = "version";
+      continue;
+    }
+    if (!positional && arg === "--doctor") {
+      options.mode = "doctor";
+      continue;
+    }
     if (!positional && (arg === "--depth" || arg === "--wt-path")) {
       const value = args[++index];
-      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value. Run wt-dash --help.`);
+      if (!value || value.startsWith("-"))
+        throw new Error(`${arg} requires a value. Run wt-dash --help.`);
       if (arg === "--depth") {
-        if (!/^\d+$/.test(value) || Number(value) > 20) throw new Error("--depth must be a whole number from 0 to 20.");
+        if (!/^\d+$/.test(value) || Number(value) > 20)
+          throw new Error("--depth must be a whole number from 0 to 20.");
         options.depth = Number(value);
       } else options.wtPath = expandPath(value, home, cwd);
       continue;
     }
-    if (!positional && arg.startsWith("-")) throw new Error(`Unknown option: ${arg}. Run wt-dash --help.`);
+    if (!positional && arg.startsWith("-"))
+      throw new Error(`Unknown option: ${arg}. Run wt-dash --help.`);
     options.roots.push(expandPath(arg, home, cwd));
   }
   if (!options.roots.length) options.roots.push(join(home, "projects"));

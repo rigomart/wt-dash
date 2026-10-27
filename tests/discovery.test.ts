@@ -16,10 +16,7 @@ test("finds repo roots through a depth-3 .git directory and skips deeper ones", 
   await mkdir(join(root, "group", "nested", ".git"), { recursive: true });
   await mkdir(join(root, "group", "too", "deep", ".git"), { recursive: true });
   await mkdir(join(root, "top", "nested", ".git"), { recursive: true });
-  expect(await discoverRepos(root, 3)).toEqual([
-    join(root, "group", "nested"),
-    join(root, "top"),
-  ]);
+  expect(await discoverRepos(root, 3)).toEqual([join(root, "group", "nested"), join(root, "top")]);
 });
 
 test("ignores .git files and symlinked directories", async () => {

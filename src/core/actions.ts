@@ -24,32 +24,65 @@ export interface RemovalEntry extends FileReport {
   requiresDiscard: boolean;
   branchWillBeRetained: boolean;
 }
-export interface RemovalPlan { entries: RemovalEntry[] }
+export interface RemovalPlan {
+  entries: RemovalEntry[];
+}
 export interface RemovalResult {
-  items: Array<{ id: string; status: "removed" | "failed" | "skipped" | "unverified"; branchOutcome?: string; error?: string }>;
+  items: Array<{
+    id: string;
+    status: "removed" | "failed" | "skipped" | "unverified";
+    branchOutcome?: string;
+    error?: string;
+  }>;
   freedKiB: number | null;
   warnings: string[];
 }
-export interface PrunePlan { repoPath: string; records: string[] }
-export type RemovalProgress = (id: string, status: "removing" | "removed" | "failed" | "skipped" | "unverified") => void;
+export interface PrunePlan {
+  repoPath: string;
+  records: string[];
+}
+export type RemovalProgress = (
+  id: string,
+  status: "removing" | "removed" | "failed" | "skipped" | "unverified",
+) => void;
 export interface ActionService {
   inspectFiles(row: WorktreeRow): Promise<FileReport>;
   prepareRemoval(rows: WorktreeRow[]): Promise<RemovalPlan>;
   /** Batches confirmed while another is running wait for it, then run in order. */
-  executeRemoval(plan: RemovalPlan, choices: Record<string, RemovalChoice>,
-    onProgress?: RemovalProgress, shouldStop?: () => boolean): Promise<RemovalResult>;
+  executeRemoval(
+    plan: RemovalPlan,
+    choices: Record<string, RemovalChoice>,
+    onProgress?: RemovalProgress,
+    shouldStop?: () => boolean,
+  ): Promise<RemovalResult>;
   preparePrune(repoPath: string): Promise<PrunePlan>;
   executePrune(plan: PrunePlan): Promise<void>;
 }
 
 function stamp(row: WorktreeRow): string {
-  return JSON.stringify([row.id, row.repoPath, row.path, row.branch, row.headSha, row.changes,
-    row.upstreamAhead, row.mainState, row.mainAhead, row.defaultBranch, row.integrationReason, row.locked, row.lockReason, row.operation, row.prunable]);
+  return JSON.stringify([
+    row.id,
+    row.repoPath,
+    row.path,
+    row.branch,
+    row.headSha,
+    row.changes,
+    row.upstreamAhead,
+    row.mainState,
+    row.mainAhead,
+    row.defaultBranch,
+    row.integrationReason,
+    row.locked,
+    row.lockReason,
+    row.operation,
+    row.prunable,
+  ]);
 }
 export function removalBlockReason(row: WorktreeRow): string | null {
   return assess(row).removalBlockReason;
 }
-const disposablePath = /(^|\/)(node_modules|\.next|\.turbo|\.vite|\.cache|dist|build|target|coverage)\/?$|(^|\/)\.DS_Store$|\.tsbuildinfo$/;
+const disposablePath =
+  /(^|\/)(node_modules|\.next|\.turbo|\.vite|\.cache|dist|build|target|coverage)\/?$|(^|\/)\.DS_Store$|\.tsbuildinfo$/;
 
 function statusFiles(stdout: string): FileReport {
   const report: FileReport = { localFiles: [], ignoredFiles: [], disposableIgnored: 0 };
@@ -67,7 +100,9 @@ function filesStamp(entry: RemovalEntry): string {
   return JSON.stringify(entry.localFiles);
 }
 function failure(name: string, result: { exitCode: number; stderr: string }): Error {
-  return new Error(`${name} exited ${result.exitCode}: ${result.stderr.trim() || "no error details"}`);
+  return new Error(
+    `${name} exited ${result.exitCode}: ${result.stderr.trim() || "no error details"}`,
+  );
 }
 function availableKiB(stdout: string): number | null {
   const line = stdout.trim().split("\n")[1];
@@ -88,12 +123,29 @@ export function createActionService(options: {
   let removals = 0;
 
   async function readFiles(row: WorktreeRow): Promise<FileReport> {
-    const status = await options.runner("git", ["-C", row.path, "status", "--porcelain=v1", "--ignored", "--untracked-files=normal"]);
-    if (status.exitCode !== 0) throw new Error(`Could not inspect local files: ${status.stderr.trim() || "git status failed"}`);
+    const status = await options.runner("git", [
+      "-C",
+      row.path,
+      "status",
+      "--porcelain=v1",
+      "--ignored",
+      "--untracked-files=normal",
+    ]);
+    if (status.exitCode !== 0)
+      throw new Error(
+        `Could not inspect local files: ${status.stderr.trim() || "git status failed"}`,
+      );
     return statusFiles(status.stdout);
   }
   async function listRepo(repoPath: string, paths: string[]): Promise<WorktreeRow[]> {
-    const listing = await options.runner(options.wtPath, ["-C", repoPath, "--config-set", "list.json-schema=2", "list", "--format=json"]);
+    const listing = await options.runner(options.wtPath, [
+      "-C",
+      repoPath,
+      "--config-set",
+      "list.json-schema=2",
+      "list",
+      "--format=json",
+    ]);
     if (listing.exitCode !== 0) throw failure("wt list", listing);
     const rows = parseWorktrunk(repoPath, listing.stdout);
     const found = rows.find((item) => paths.includes(item.path));
@@ -106,44 +158,79 @@ export function createActionService(options: {
   }
   async function checkAgainst(row: WorktreeRow, listing: WorktreeRow[]): Promise<RemovalEntry> {
     const fresh = listing.find((item) => item.path === row.path);
-    const blockedReason = !fresh ? "it is missing or is the main worktree"
-      : stamp(fresh) !== stamp(row) ? "it changed; refresh and preview again" : null;
-    const entry: RemovalEntry = { row: fresh ?? row, blockedReason, localFiles: [], ignoredFiles: [],
-      disposableIgnored: 0, requiresDiscard: false,
-      branchWillBeRetained: row.branch !== null && !["empty", "integrated", "same_commit"].includes(row.mainState ?? "") };
+    const blockedReason = !fresh
+      ? "it is missing or is the main worktree"
+      : stamp(fresh) !== stamp(row)
+        ? "it changed; refresh and preview again"
+        : null;
+    const entry: RemovalEntry = {
+      row: fresh ?? row,
+      blockedReason,
+      localFiles: [],
+      ignoredFiles: [],
+      disposableIgnored: 0,
+      requiresDiscard: false,
+      branchWillBeRetained:
+        row.branch !== null &&
+        !["empty", "integrated", "same_commit"].includes(row.mainState ?? ""),
+    };
     if (blockedReason) return entry;
     const assessment = assess(fresh!);
     entry.row = { ...fresh!, verdict: assessment.verdict, reason: assessment.reason };
     entry.blockedReason = assessment.removalBlockReason;
     if (entry.blockedReason) return entry;
-    try { Object.assign(entry, await readFiles(fresh!)); }
-    catch (error) {
+    try {
+      Object.assign(entry, await readFiles(fresh!));
+    } catch (error) {
       entry.blockedReason = error instanceof Error ? error.message : String(error);
       return entry;
     }
     const changes = fresh!.changes;
-    entry.requiresDiscard = entry.localFiles.length > 0 ||
-      !!changes && (changes.staged || changes.modified || changes.untracked || changes.renamed || changes.deleted);
+    entry.requiresDiscard =
+      entry.localFiles.length > 0 ||
+      (!!changes &&
+        (changes.staged ||
+          changes.modified ||
+          changes.untracked ||
+          changes.renamed ||
+          changes.deleted));
     return entry;
   }
   async function diskSpace(): Promise<number | null> {
     try {
       const result = await options.runner("df", ["-k", "/System/Volumes/Data"]);
       return result.exitCode === 0 ? availableKiB(result.stdout) : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
   async function log(value: object) {
     await mkdir(dirname(options.logPath), { recursive: true });
     await appendFile(options.logPath, JSON.stringify(value) + "\n");
   }
   async function dryPrune(repoPath: string): Promise<string[]> {
-    const result = await options.runner("git", ["-C", repoPath, "worktree", "prune", "--dry-run", "--expire=now", "--verbose"]);
+    const result = await options.runner("git", [
+      "-C",
+      repoPath,
+      "worktree",
+      "prune",
+      "--dry-run",
+      "--expire=now",
+      "--verbose",
+    ]);
     if (result.exitCode !== 0) throw failure("git worktree prune", result);
-    return (result.stdout + "\n" + result.stderr).split("\n").map((line) => line.trim()).filter(Boolean);
+    return (result.stdout + "\n" + result.stderr)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   }
 
-  async function removeBatch(plan: RemovalPlan, choices: Record<string, RemovalChoice>,
-    onProgress?: RemovalProgress, shouldStop?: () => boolean): Promise<RemovalResult> {
+  async function removeBatch(
+    plan: RemovalPlan,
+    choices: Record<string, RemovalChoice>,
+    onProgress?: RemovalProgress,
+    shouldStop?: () => boolean,
+  ): Promise<RemovalResult> {
     const items: RemovalResult["items"] = [];
     const warnings: string[] = [];
     const succeededRepos = new Set<string>();
@@ -155,33 +242,65 @@ export function createActionService(options: {
         items.push({ id: row.id, status: "skipped", error });
         onProgress?.(row.id, "skipped");
       };
-      if (shouldStop?.()) { skip("Cancelled"); continue; }
-      if (entry.blockedReason || !choice?.include) { skip(entry.blockedReason ?? "Not confirmed"); continue; }
-      if (entry.requiresDiscard && !choice.discardChanges) { skip("Discarding local files was not confirmed"); continue; }
-      if (choice.forceDeleteBranch && !entry.branchWillBeRetained) { skip("Forced branch deletion does not apply"); continue; }
+      if (shouldStop?.()) {
+        skip("Cancelled");
+        continue;
+      }
+      if (entry.blockedReason || !choice?.include) {
+        skip(entry.blockedReason ?? "Not confirmed");
+        continue;
+      }
+      if (entry.requiresDiscard && !choice.discardChanges) {
+        skip("Discarding local files was not confirmed");
+        continue;
+      }
+      if (choice.forceDeleteBranch && !entry.branchWillBeRetained) {
+        skip("Forced branch deletion does not apply");
+        continue;
+      }
       let current: RemovalEntry;
-      try { current = await checkRow(row); }
-      catch (error) { skip(String(error)); continue; }
+      try {
+        current = await checkRow(row);
+      } catch (error) {
+        skip(String(error));
+        continue;
+      }
       if (current.blockedReason || filesStamp(current) !== filesStamp(entry)) {
         skip(current.blockedReason ?? "Local files changed since preview");
         continue;
       }
-      const flags = [choice.discardChanges && entry.requiresDiscard ? "-f" : null,
+      const flags = [
+        choice.discardChanges && entry.requiresDiscard ? "-f" : null,
         choice.forceDeleteBranch ? "-D" : null,
-        choice.reapProcesses ? "--reap" : null].filter((flag): flag is string => flag !== null);
+        choice.reapProcesses ? "--reap" : null,
+      ].filter((flag): flag is string => flag !== null);
       onProgress?.(row.id, "removing");
       let exitCode = -1;
       let branchOutcome: string | undefined;
       let error: string | undefined;
       try {
-        const result = await options.runner(options.wtPath,
-          ["-C", row.repoPath, "remove", "-y", "--no-hooks", "--foreground", "--format=json", ...flags, row.path]);
+        const result = await options.runner(options.wtPath, [
+          "-C",
+          row.repoPath,
+          "remove",
+          "-y",
+          "--no-hooks",
+          "--foreground",
+          "--format=json",
+          ...flags,
+          row.path,
+        ]);
         exitCode = result.exitCode;
         if (result.exitCode !== 0) throw failure("wt remove", result);
         const parsed = JSON.parse(result.stdout.trim()) as unknown;
         const values = Array.isArray(parsed) ? parsed : [parsed];
-        const value = values.find((item): item is Record<string, unknown> =>
-          typeof item === "object" && item !== null && item.kind === "worktree" && item.path === row.path);
+        const value = values.find(
+          (item): item is Record<string, unknown> =>
+            typeof item === "object" &&
+            item !== null &&
+            item.kind === "worktree" &&
+            item.path === row.path,
+        );
         if (!value || typeof value.branch_outcome !== "string") {
           throw new Error("Unexpected Worktrunk removal result");
         }
@@ -195,20 +314,35 @@ export function createActionService(options: {
         items.push({ id: row.id, status, error });
         onProgress?.(row.id, status);
         if (status === "unverified") {
-          warnings.push(`Removal outcome for ${row.path} could not be verified; check the refreshed list`);
+          warnings.push(
+            `Removal outcome for ${row.path} could not be verified; check the refreshed list`,
+          );
           succeededRepos.add(row.repoPath);
         }
       }
       try {
-        await log({ timestamp: new Date().toISOString(), repo: row.repoPath, branch: row.branch,
-          path: row.path, flags, exitCode, branchOutcome: branchOutcome ?? null, error: error ?? null });
-      } catch (cause) { warnings.push(`Could not write removal log for ${row.path}: ${String(cause)}`); }
+        await log({
+          timestamp: new Date().toISOString(),
+          repo: row.repoPath,
+          branch: row.branch,
+          path: row.path,
+          flags,
+          exitCode,
+          branchOutcome: branchOutcome ?? null,
+          error: error ?? null,
+        });
+      } catch (cause) {
+        warnings.push(`Could not write removal log for ${row.path}: ${String(cause)}`);
+      }
     }
     for (const repo of succeededRepos) {
       try {
         const result = await options.runner("git", ["-C", repo, "worktree", "prune"]);
-        if (result.exitCode !== 0) warnings.push(`Could not prune ${repo}: ${result.stderr.trim()}`);
-      } catch (error) { warnings.push(`Could not prune ${repo}: ${String(error)}`); }
+        if (result.exitCode !== 0)
+          warnings.push(`Could not prune ${repo}: ${result.stderr.trim()}`);
+      } catch (error) {
+        warnings.push(`Could not prune ${repo}: ${String(error)}`);
+      }
     }
     const after = await diskSpace();
     return { items, freedKiB: before === null || after === null ? null : after - before, warnings };
@@ -225,14 +359,25 @@ export function createActionService(options: {
       async function worker(): Promise<void> {
         while (nextRepo < repos.length) {
           const repo = repos[nextRepo++]!;
-          const indexes = rows.flatMap((row, index) => row.repoPath === repo ? [index] : []);
-          const listing = listRepo(repo, indexes.map((index) => rows[index]!.path));
+          const indexes = rows.flatMap((row, index) => (row.repoPath === repo ? [index] : []));
+          const listing = listRepo(
+            repo,
+            indexes.map((index) => rows[index]!.path),
+          );
           for (const index of indexes) {
             const row = rows[index]!;
-            try { entries[index] = await checkAgainst(row, await listing); }
-            catch (error) {
-              entries[index] = { row, blockedReason: String(error), localFiles: [], ignoredFiles: [],
-                disposableIgnored: 0, requiresDiscard: false, branchWillBeRetained: false };
+            try {
+              entries[index] = await checkAgainst(row, await listing);
+            } catch (error) {
+              entries[index] = {
+                row,
+                blockedReason: String(error),
+                localFiles: [],
+                ignoredFiles: [],
+                disposableIgnored: 0,
+                requiresDiscard: false,
+                branchWillBeRetained: false,
+              };
             }
           }
         }
@@ -248,7 +393,11 @@ export function createActionService(options: {
       removals++;
       const run = queue.then(() => removeBatch(plan, choices, onProgress, shouldStop));
       queue = run.catch(() => {});
-      try { return await run; } finally { removals--; }
+      try {
+        return await run;
+      } finally {
+        removals--;
+      }
     },
     async preparePrune(repoPath) {
       if (pruning || removals) throw new Error("Cleanup is running");
@@ -262,11 +411,21 @@ export function createActionService(options: {
       prunePlan = null;
       try {
         const current = await dryPrune(plan.repoPath);
-        if (JSON.stringify(current) !== JSON.stringify(plan.records)) throw new Error("Prunable records changed; preview again");
+        if (JSON.stringify(current) !== JSON.stringify(plan.records))
+          throw new Error("Prunable records changed; preview again");
         if (!current.length) return;
-        const result = await options.runner("git", ["-C", plan.repoPath, "worktree", "prune", "--expire=now", "--verbose"]);
+        const result = await options.runner("git", [
+          "-C",
+          plan.repoPath,
+          "worktree",
+          "prune",
+          "--expire=now",
+          "--verbose",
+        ]);
         if (result.exitCode !== 0) throw failure("git worktree prune", result);
-      } finally { pruning = false; }
+      } finally {
+        pruning = false;
+      }
     },
   };
 }

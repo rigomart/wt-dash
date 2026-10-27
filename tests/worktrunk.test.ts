@@ -24,7 +24,9 @@ describe("parseWorktrunk", () => {
   });
 
   test("rejects unsupported schema and malformed JSON", () => {
-    expect(() => parseWorktrunk(repo, JSON.stringify({ ...fixture, schema: 1 }))).toThrow(SchemaMismatchError);
+    expect(() => parseWorktrunk(repo, JSON.stringify({ ...fixture, schema: 1 }))).toThrow(
+      SchemaMismatchError,
+    );
     expect(() => parseWorktrunk(repo, "{")).toThrow();
   });
 
@@ -32,7 +34,10 @@ describe("parseWorktrunk", () => {
     const rows = parseWorktrunk(repo, JSON.stringify(fixture));
     expect(rows[1]).toMatchObject({
       upstreamAhead: null,
-      lockReason: null, mainAhead: null, defaultBranch: "main", mainBase: null,
+      lockReason: null,
+      mainAhead: null,
+      defaultBranch: "main",
+      mainBase: null,
       locked: false,
       operation: null,
       sizeKiB: null,
@@ -41,10 +46,16 @@ describe("parseWorktrunk", () => {
   });
 });
 
-test('preserves full lock reason and Worktrunk commit count',()=>{
- const payload:any=structuredClone(fixture);
- payload.items[1].worktree.locked={reason:'claude session example (pid 42 start Wed Sep 23 15:55:03 2026)'};
- payload.items[1].default_branch.ahead=3;
- const row=parseWorktrunk(repo,JSON.stringify(payload))[0]!;
- expect(row).toMatchObject({lockReason:'claude session example (pid 42 start Wed Sep 23 15:55:03 2026)',mainAhead:3,defaultBranch:'main'});
+test("preserves full lock reason and Worktrunk commit count", () => {
+  const payload: any = structuredClone(fixture);
+  payload.items[1].worktree.locked = {
+    reason: "claude session example (pid 42 start Wed Sep 23 15:55:03 2026)",
+  };
+  payload.items[1].default_branch.ahead = 3;
+  const row = parseWorktrunk(repo, JSON.stringify(payload))[0]!;
+  expect(row).toMatchObject({
+    lockReason: "claude session example (pid 42 start Wed Sep 23 15:55:03 2026)",
+    mainAhead: 3,
+    defaultBranch: "main",
+  });
 });

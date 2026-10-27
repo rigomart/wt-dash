@@ -3,14 +3,28 @@ import { join } from "node:path";
 
 export async function discoverRepos(root: string, maxDepth: number): Promise<string[]> {
   const repos: string[] = [];
-  const skipped = new Set([".git", "node_modules", "dist", "build", "target", ".next", ".cache", ".Trash"]);
+  const skipped = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    ".cache",
+    ".Trash",
+  ]);
 
   async function visit(directory: string, depth: number): Promise<void> {
-    const entries = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-      if (depth > 0 && ["EACCES", "EPERM", "ENOENT"].includes(error.code ?? "")) return [];
-      throw error;
-    });
-    if (depth + 1 <= maxDepth && entries.some((entry) => entry.name === ".git" && entry.isDirectory())) {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (depth > 0 && ["EACCES", "EPERM", "ENOENT"].includes(error.code ?? "")) return [];
+        throw error;
+      },
+    );
+    if (
+      depth + 1 <= maxDepth &&
+      entries.some((entry) => entry.name === ".git" && entry.isDirectory())
+    ) {
       repos.push(directory);
       return;
     }

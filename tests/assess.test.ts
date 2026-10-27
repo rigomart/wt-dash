@@ -50,12 +50,18 @@ test("Git blockers take precedence over reviewable local changes", () => {
   const changes = { ...base.changes!, modified: true };
   expect(assessment({ changes, mainState: null }).status).toBe("status unknown");
   expect(assessment({ changes, locked: true }).status).toBe("locked");
-  expect(assessment({ changes: { ...changes, conflicted: true }, locked: true }).status).toBe("unresolved conflicts");
+  expect(assessment({ changes: { ...changes, conflicted: true }, locked: true }).status).toBe(
+    "unresolved conflicts",
+  );
   expect(assessment({ operation: "rebase", prunable: true }).verdict).toBe("Busy");
 });
 
 test("one status describes local changes even when commits are unpushed and not merged", () => {
-  const result = assessment({ changes: { ...base.changes!, modified: true }, upstreamAhead: 2, mainState: "ahead" });
+  const result = assessment({
+    changes: { ...base.changes!, modified: true },
+    upstreamAhead: 2,
+    mainState: "ahead",
+  });
   expect(result.status).toBe("uncommitted changes");
   expect(result.verdict).toBe("Review");
   expect(result.removalBlockReason).toBeNull();
@@ -67,20 +73,32 @@ test("details name the comparison base and integration evidence", () => {
   expect(result.reason).toContain("squash or rebase merge");
   expect(assessment({ mainState: "ahead", mainAhead: 3 }).reason).toContain("3 commits");
   expect(assessment({ mainState: "would_conflict" }).reason).toContain("would conflict");
-  expect(assessment({ mainState: "ahead", mainAhead: 1 }).reason).toBe("1 commit isn't in origin/main.");
+  expect(assessment({ mainState: "ahead", mainAhead: 1 }).reason).toBe(
+    "1 commit isn't in origin/main.",
+  );
 });
 
-test.each([{ operation: "rebase" }, { prunable: true }, { locked: true, lockReason: null }, { changes: null }] as const)(
-  "block reasons complete \"Can't remove x: …\" without repeating details for %j", update => {
+test.each([
+  { operation: "rebase" },
+  { prunable: true },
+  { locked: true, lockReason: null },
+  { changes: null },
+] as const)(
+  'block reasons complete "Can\'t remove x: …" without repeating details for %j',
+  (update) => {
     const result = assessment(update);
     expect(result.removalBlockReason).toMatch(/^[a-z]/);
     expect(result.removalBlockReason).not.toBe(result.reason);
-  });
+  },
+);
 
-test.each(["🤖", "💬", "✅"])("agent marker %s does not affect Git cleanup eligibility", marker => {
-  const payload = structuredClone(fixture);
-  Object.assign(payload.items[1]!, { marker });
-  const result = assess(parseWorktrunk("/repo", JSON.stringify(payload))[0]!);
-  expect(result.verdict).toBe("Safe");
-  expect(result.removalBlockReason).toBeNull();
-});
+test.each(["🤖", "💬", "✅"])(
+  "agent marker %s does not affect Git cleanup eligibility",
+  (marker) => {
+    const payload = structuredClone(fixture);
+    Object.assign(payload.items[1]!, { marker });
+    const result = assess(parseWorktrunk("/repo", JSON.stringify(payload))[0]!);
+    expect(result.verdict).toBe("Safe");
+    expect(result.removalBlockReason).toBeNull();
+  },
+);

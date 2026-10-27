@@ -1,9 +1,24 @@
 import { homedir } from "node:os";
-import { CliRenderEvents, RGBA, TextRenderable, createCliRenderer, type CliRenderer, type KeyEvent } from "@opentui/core";
+import {
+  CliRenderEvents,
+  RGBA,
+  TextRenderable,
+  createCliRenderer,
+  type CliRenderer,
+  type KeyEvent,
+} from "@opentui/core";
 import type { ActionService } from "../core/actions";
 import type { DashboardService, DashboardSnapshot } from "../core/types";
 import { toStyledText } from "./line";
-import { initialState, listView, spinning, update, type Effect, type UiEvent, type UiState } from "./model";
+import {
+  initialState,
+  listView,
+  spinning,
+  update,
+  type Effect,
+  type UiEvent,
+  type UiState,
+} from "./model";
 import { listPageSize, render, type RenderContext, type Viewport } from "./render";
 import { createTheme } from "./theme";
 
@@ -14,7 +29,7 @@ export async function runTerminal(
   service: DashboardService,
   options: { renderer?: CliRenderer; actions?: ActionService; home?: string } = {},
 ): Promise<void> {
-  const renderer = options.renderer ?? await createCliRenderer({ exitOnCtrlC: false });
+  const renderer = options.renderer ?? (await createCliRenderer({ exitOnCtrlC: false }));
   const screen = new TextRenderable(renderer, {
     id: "dashboard-screen",
     content: "",
@@ -36,15 +51,28 @@ export async function runTerminal(
   let finished = false;
   let inspectTimer: ReturnType<typeof setTimeout> | null = null;
   let resolveExit!: () => void;
-  const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
+  const exit = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
 
   function renderContext(): RenderContext {
-    return { snapshot, width: renderer.width, height: renderer.height, now: Date.now(), theme, home, canAct: actions !== undefined };
+    return {
+      snapshot,
+      width: renderer.width,
+      height: renderer.height,
+      now: Date.now(),
+      theme,
+      home,
+      canAct: actions !== undefined,
+    };
   }
 
   function context() {
     return {
-      snapshot, now: Date.now(), pageSize: listPageSize(renderer.height), canAct: actions !== undefined,
+      snapshot,
+      now: Date.now(),
+      pageSize: listPageSize(renderer.height),
+      canAct: actions !== undefined,
       canExpand: listView(state, snapshot).focus !== null,
     };
   }
@@ -69,7 +97,10 @@ export async function runTerminal(
   }
 
   function finish(): void {
-    if (!finished) { finished = true; resolveExit(); }
+    if (!finished) {
+      finished = true;
+      resolveExit();
+    }
   }
 
   function dispatch(event: UiEvent): void {
@@ -84,30 +115,46 @@ export async function runTerminal(
 
   function perform(effect: Effect): void {
     switch (effect.type) {
-      case "quit": finish(); return;
-      case "refresh": void service.refresh(effect.repos); return;
-      case "remeasure": void service.refreshSize(effect.id); return;
+      case "quit":
+        finish();
+        return;
+      case "refresh":
+        void service.refresh(effect.repos);
+        return;
+      case "remeasure":
+        void service.refreshSize(effect.id);
+        return;
       case "prepareRemoval":
         actions!.prepareRemoval(effect.rows).then(
           (plan) => dispatch({ type: "planReady", token: effect.token, plan }),
-          (error) => dispatch({ type: "planFailed", token: effect.token, error: message(error) }));
+          (error) => dispatch({ type: "planFailed", token: effect.token, error: message(error) }),
+        );
         return;
       case "executeRemoval":
-        actions!.executeRemoval(effect.plan, effect.choices,
-          (id, status) => dispatch({ type: "progress", id, status }),
-          () => state.jobs.find((job) => job.id === effect.jobId)?.stopping ?? false).then(
-          (result) => dispatch({ type: "removalDone", jobId: effect.jobId, result }),
-          (error) => dispatch({ type: "removalFailed", jobId: effect.jobId, error: message(error) }));
+        actions!
+          .executeRemoval(
+            effect.plan,
+            effect.choices,
+            (id, status) => dispatch({ type: "progress", id, status }),
+            () => state.jobs.find((job) => job.id === effect.jobId)?.stopping ?? false,
+          )
+          .then(
+            (result) => dispatch({ type: "removalDone", jobId: effect.jobId, result }),
+            (error) =>
+              dispatch({ type: "removalFailed", jobId: effect.jobId, error: message(error) }),
+          );
         return;
       case "preparePrune":
         actions!.preparePrune(effect.repoPath).then(
           (plan) => dispatch({ type: "pruneReady", token: effect.token, plan }),
-          (error) => dispatch({ type: "pruneFailed", token: effect.token, error: message(error) }));
+          (error) => dispatch({ type: "pruneFailed", token: effect.token, error: message(error) }),
+        );
         return;
       case "executePrune":
         actions!.executePrune(effect.plan).then(
           () => dispatch({ type: "pruneDone", plan: effect.plan }),
-          (error) => dispatch({ type: "pruneFailed", token: null, error: message(error) }));
+          (error) => dispatch({ type: "pruneFailed", token: null, error: message(error) }),
+        );
         return;
     }
   }
@@ -121,16 +168,33 @@ export async function runTerminal(
     const generation = state.generation;
     inspectTimer = setTimeout(() => {
       inspectTimer = null;
-      if (finished || state.generation !== generation || listView(state, snapshot).focus?.id !== row.id || state.files[row.id]) return;
+      if (
+        finished ||
+        state.generation !== generation ||
+        listView(state, snapshot).focus?.id !== row.id ||
+        state.files[row.id]
+      )
+        return;
       dispatch({ type: "files", id: row.id, generation, state: { kind: "loading" } });
       actions.inspectFiles(row).then(
-        (report) => dispatch({ type: "files", id: row.id, generation, state: { kind: "ready", report } }),
-        (error) => dispatch({ type: "files", id: row.id, generation, state: { kind: "error", message: message(error) } }));
+        (report) =>
+          dispatch({ type: "files", id: row.id, generation, state: { kind: "ready", report } }),
+        (error) =>
+          dispatch({
+            type: "files",
+            id: row.id,
+            generation,
+            state: { kind: "error", message: message(error) },
+          }),
+      );
     }, INSPECT_DELAY_MS);
   }
 
   function onKey(key: KeyEvent): void {
-    dispatch({ type: "key", key: { name: key.name.toLowerCase(), char: key.sequence, ctrl: key.ctrl } });
+    dispatch({
+      type: "key",
+      key: { name: key.name.toLowerCase(), char: key.sequence, ctrl: key.ctrl },
+    });
   }
 
   const unsubscribe = service.subscribe((next) => {

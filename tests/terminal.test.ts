@@ -5,34 +5,77 @@ import type { DashboardService, DashboardSnapshot, WorktreeRow } from "../src/co
 
 function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}): WorktreeRow {
   return {
-    id, repoPath: "/repos/alpha", repoName: "alpha", path: `/repos/alpha/worktrees/${id}`,
-    branch: id, headSha: "abcdef1234", committedAt: "2026-09-28T00:00:00Z", tool: "Claude",
-    changes: { staged: false, modified: false, untracked: false, renamed: false, deleted: false, conflicted: false },
-    upstreamAhead: 0, mainState: "integrated", lockReason: null, mainAhead: null, defaultBranch: "main", mainBase: "main", locked: false, prunable: false, operation: null,
-    sizeKiB, sizeMeasuredAt: "2026-09-29T00:00:00Z", verdict: "Safe", reason: "Integrated into main",
+    id,
+    repoPath: "/repos/alpha",
+    repoName: "alpha",
+    path: `/repos/alpha/worktrees/${id}`,
+    branch: id,
+    headSha: "abcdef1234",
+    committedAt: "2026-09-28T00:00:00Z",
+    tool: "Claude",
+    changes: {
+      staged: false,
+      modified: false,
+      untracked: false,
+      renamed: false,
+      deleted: false,
+      conflicted: false,
+    },
+    upstreamAhead: 0,
+    mainState: "integrated",
+    lockReason: null,
+    mainAhead: null,
+    defaultBranch: "main",
+    mainBase: "main",
+    locked: false,
+    prunable: false,
+    operation: null,
+    sizeKiB,
+    sizeMeasuredAt: "2026-09-29T00:00:00Z",
+    verdict: "Safe",
+    reason: "Integrated into main",
     ...overrides,
   };
 }
 
 function fakeService(rows: WorktreeRow[]) {
   let snapshot: DashboardSnapshot = {
-    generation: 1, rows,
-    progress: { phase: "complete", reposTotal: 1, reposDone: 1, startedAt: "2026-09-29T00:00:00Z", completedAt: "2026-09-29T00:00:01Z" },
-    errors: {}, fatalError: null,
+    generation: 1,
+    rows,
+    progress: {
+      phase: "complete",
+      reposTotal: 1,
+      reposDone: 1,
+      startedAt: "2026-09-29T00:00:00Z",
+      completedAt: "2026-09-29T00:00:01Z",
+    },
+    errors: {},
+    fatalError: null,
   };
   let refreshes = 0;
   const listeners = new Set<(snapshot: DashboardSnapshot) => void>();
   const service: DashboardService = {
     getSnapshot: () => snapshot,
-    subscribe: (listener) => { listeners.add(listener); listener(snapshot); return () => { listeners.delete(listener); }; },
-    refresh: async () => { refreshes++; },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      listener(snapshot);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    refresh: async () => {
+      refreshes++;
+    },
     refreshSize: async () => {},
     close: async () => {},
   };
   return {
     service,
     getRefreshes: () => refreshes,
-    setRows: (nextRows: WorktreeRow[], phase: DashboardSnapshot["progress"]["phase"] = "complete") => {
+    setRows: (
+      nextRows: WorktreeRow[],
+      phase: DashboardSnapshot["progress"]["phase"] = "complete",
+    ) => {
       snapshot = { ...snapshot, rows: nextRows, progress: { ...snapshot.progress, phase } };
       for (const listener of listeners) listener(snapshot);
     },
@@ -41,12 +84,21 @@ function fakeService(rows: WorktreeRow[]) {
 
 function entry(item: WorktreeRow, overrides: Partial<RemovalEntry> = {}): RemovalEntry {
   return {
-    row: item, blockedReason: null, localFiles: [], ignoredFiles: [], disposableIgnored: 0,
-    requiresDiscard: false, branchWillBeRetained: false, ...overrides,
+    row: item,
+    blockedReason: null,
+    localFiles: [],
+    ignoredFiles: [],
+    disposableIgnored: 0,
+    requiresDiscard: false,
+    branchWillBeRetained: false,
+    ...overrides,
   };
 }
 
-function fakeActions(entries: (rows: WorktreeRow[]) => RemovalEntry[], overrides: Partial<ActionService> = {}) {
+function fakeActions(
+  entries: (rows: WorktreeRow[]) => RemovalEntry[],
+  overrides: Partial<ActionService> = {},
+) {
   const executed: Array<Record<string, unknown>> = [];
   const actions: ActionService = {
     inspectFiles: async () => ({ localFiles: [], ignoredFiles: [], disposableIgnored: 0 }),
@@ -54,8 +106,13 @@ function fakeActions(entries: (rows: WorktreeRow[]) => RemovalEntry[], overrides
     executeRemoval: async (plan, choices) => {
       executed.push(choices);
       return {
-        items: plan.entries.map((item) => ({ id: item.row.id, status: "removed" as const, branchOutcome: "deleted" })),
-        freedKiB: 2048, warnings: [],
+        items: plan.entries.map((item) => ({
+          id: item.row.id,
+          status: "removed" as const,
+          branchOutcome: "deleted",
+        })),
+        freedKiB: 2048,
+        warnings: [],
       };
     },
     preparePrune: async (repoPath) => ({ repoPath, records: [] }),
@@ -88,7 +145,14 @@ async function start(width: number, height: number, rows: WorktreeRow[], actions
 }
 
 test("rows sit under verdict sections with their reasons, and the first row opens a summary", async () => {
-  const ui = await start(130, 30, [row("api", 2000), row("docs", 500, { verdict: "Review", mainState: "ahead", reason: "Main branch relation: ahead" })]);
+  const ui = await start(130, 30, [
+    row("api", 2000),
+    row("docs", 500, {
+      verdict: "Review",
+      mainState: "ahead",
+      reason: "Main branch relation: ahead",
+    }),
+  ]);
   try {
     const frame = await ui.frame();
     expect(frame).toContain("2 worktrees · up to 2.4 MB");
@@ -137,7 +201,10 @@ test("focus stays on the first row while a scan streams rows in, then follows th
 });
 
 test("search filters as you type, matches repo names, and r rescans", async () => {
-  const ui = await start(100, 16, [row("api", 2000), row("docs", 500, { repoName: "beta", repoPath: "/repos/beta", path: "/elsewhere/docs" })]);
+  const ui = await start(100, 16, [
+    row("api", 2000),
+    row("docs", 500, { repoName: "beta", repoPath: "/repos/beta", path: "/elsewhere/docs" }),
+  ]);
   try {
     ui.setup.mockInput.pressKey("/");
     await ui.setup.mockInput.typeText("beta");
@@ -157,7 +224,10 @@ test("search filters as you type, matches repo names, and r rescans", async () =
 });
 
 test("number keys switch verdict tabs", async () => {
-  const ui = await start(100, 16, [row("api", 2000), row("docs", 500, { verdict: "Review", mainState: "ahead" })]);
+  const ui = await start(100, 16, [
+    row("api", 2000),
+    row("docs", 500, { verdict: "Review", mainState: "ahead" }),
+  ]);
   try {
     ui.setup.mockInput.pressKey("3");
     const frame = await ui.frame();
@@ -172,7 +242,9 @@ test("number keys switch verdict tabs", async () => {
 test("q quits and destroys the renderer", async () => {
   const ui = await start(40, 12, [row("api", 2000)]);
   let destroyed = false;
-  ui.setup.renderer.once("destroy", () => { destroyed = true; });
+  ui.setup.renderer.once("destroy", () => {
+    destroyed = true;
+  });
   ui.setup.mockInput.pressKey("q");
   await ui.running;
   expect(destroyed).toBe(true);
@@ -182,7 +254,12 @@ test("Ctrl-C quits during search", async () => {
   const ui = await start(40, 12, [row("api", 2000)]);
   ui.setup.mockInput.pressKey("/");
   ui.setup.mockInput.pressCtrlC();
-  await Promise.race([ui.running, Bun.sleep(200).then(() => { throw new Error("Ctrl-C did not quit"); })]);
+  await Promise.race([
+    ui.running,
+    Bun.sleep(200).then(() => {
+      throw new Error("Ctrl-C did not quit");
+    }),
+  ]);
 });
 
 test("v groups by repo, Safe rows first in each repo, and movement follows the visible order", async () => {
@@ -210,11 +287,14 @@ test("v groups by repo, Safe rows first in each repo, and movement follows the v
 });
 
 test("expanded details scroll to reveal a long path and reason in a tiny terminal", async () => {
-  const ui = await start(32, 12, [row("api", 2000, {
-    path: `/repos/alpha/worktrees/${"x".repeat(140)}PATH_END`,
-    locked: true, verdict: "Review",
-    lockReason: `${"Needs careful review ".repeat(10)}REASON_END`,
-  })]);
+  const ui = await start(32, 12, [
+    row("api", 2000, {
+      path: `/repos/alpha/worktrees/${"x".repeat(140)}PATH_END`,
+      locked: true,
+      verdict: "Review",
+      lockReason: `${"Needs careful review ".repeat(10)}REASON_END`,
+    }),
+  ]);
   try {
     ui.setup.mockInput.pressKey("i");
     let frames = await ui.frame();
@@ -244,7 +324,11 @@ test("selecting a locked worktree explains why instead of doing nothing", async 
 
 test("details pane lists uncommitted changes and summarizes ignored files quietly", async () => {
   const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
-    inspectFiles: async () => ({ localFiles: ["?? notes.md"], ignoredFiles: [".env", "data.sqlite"], disposableIgnored: 2 }),
+    inspectFiles: async () => ({
+      localFiles: ["?? notes.md"],
+      ignoredFiles: [".env", "data.sqlite"],
+      disposableIgnored: 2,
+    }),
   });
   const ui = await start(130, 30, [row("api", 2000)], actions);
   try {
@@ -264,9 +348,15 @@ test("x then y removes in the background while the table stays on screen", async
     executeRemoval: async (plan, choices, onProgress) => {
       executed.push(choices);
       onProgress?.(item.id, "removing");
-      await new Promise<void>((resolve) => { finishRemoval = resolve; });
+      await new Promise<void>((resolve) => {
+        finishRemoval = resolve;
+      });
       onProgress?.(item.id, "removed");
-      return { items: [{ id: item.id, status: "removed", branchOutcome: "deleted" }], freedKiB: 2048, warnings: [] };
+      return {
+        items: [{ id: item.id, status: "removed", branchOutcome: "deleted" }],
+        freedKiB: 2048,
+        warnings: [],
+      };
     },
   });
   const ui = await start(130, 24, [item, row("docs", 500)], actions);
@@ -296,8 +386,9 @@ test("x then y removes in the background while the table stays on screen", async
 
 test("the confirm bar names uncommitted changes it will discard, and esc cancels", async () => {
   const item = row("api", 2000);
-  const { actions, executed } = fakeActions((rows) => rows.map((selected) =>
-    entry(selected, { localFiles: ["?? notes.md"], requiresDiscard: true })));
+  const { actions, executed } = fakeActions((rows) =>
+    rows.map((selected) => entry(selected, { localFiles: ["?? notes.md"], requiresDiscard: true })),
+  );
   const ui = await start(110, 24, [item], actions);
   try {
     ui.setup.mockInput.pressKey(" ");
@@ -309,7 +400,14 @@ test("the confirm bar names uncommitted changes it will discard, and esc cancels
     await ui.frame();
     ui.setup.mockInput.pressKey("y");
     await ui.frame();
-    expect(executed[0]).toEqual({ [item.id]: { include: true, discardChanges: true, forceDeleteBranch: false, reapProcesses: false } });
+    expect(executed[0]).toEqual({
+      [item.id]: {
+        include: true,
+        discardChanges: true,
+        forceDeleteBranch: false,
+        reapProcesses: false,
+      },
+    });
   } finally {
     await ui.stop();
   }
@@ -364,10 +462,13 @@ test("? opens the key overlay and esc closes it", async () => {
   }
 });
 
-
 test("a locked row shows Git's full lock reason when there is room, without CHECKS", async () => {
   const item = row("my-app", 2000, {
-    verdict: "Review", mainState: "ahead", mainAhead: 3, mainBase: "origin/main", locked: true,
+    verdict: "Review",
+    mainState: "ahead",
+    mainAhead: 3,
+    mainBase: "origin/main",
+    locked: true,
     lockReason: "claude session my-app (pid 24621 start Wed Sep 23 15:55:03 2026)",
   });
   const ui = await start(180, 60, [item]);
@@ -377,14 +478,21 @@ test("a locked row shows Git's full lock reason when there is room, without CHEC
     expect(frame).not.toContain("CHECKS");
     expect(frame).not.toContain("+1");
     expect(frame).not.toContain("ended");
-  } finally { await ui.stop(); }
+  } finally {
+    await ui.stop();
+  }
 });
 
 test("a missing folder offers pruning and Enter opens its prune confirmation", async () => {
   const { actions, executed } = fakeActions(() => [], {
-    preparePrune: async repoPath => ({ repoPath, records: ["prune missing record"] }),
+    preparePrune: async (repoPath) => ({ repoPath, records: ["prune missing record"] }),
   });
-  const ui = await start(130, 30, [row("missing", 0, { prunable: true, verdict: "Broken", changes: null })], actions);
+  const ui = await start(
+    130,
+    30,
+    [row("missing", 0, { prunable: true, verdict: "Broken", changes: null })],
+    actions,
+  );
   try {
     const frame = await ui.frame();
     expect(frame).toContain("folder missing");
@@ -392,5 +500,7 @@ test("a missing folder offers pruning and Enter opens its prune confirmation", a
     ui.setup.mockInput.pressEnter();
     expect(await ui.frame()).toContain("Prune 1 missing worktree record in alpha?");
     expect(executed).toHaveLength(0);
-  } finally { await ui.stop(); }
+  } finally {
+    await ui.stop();
+  }
 });

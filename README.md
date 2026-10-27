@@ -31,24 +31,24 @@ wt-dash --doctor         # check Git, Worktrunk, and folder access without openi
 
 wt-dash looks for repositories up to two folder levels below each folder you give it (`--depth` changes this). Point it at main repositories or the folders that contain them. Worktrees stored elsewhere still show up, because Worktrunk lists every worktree linked to a repository wherever it lives.
 
-| Option | Effect |
-|---|---|
-| `--depth <n>` | Folder levels to search below each root, 0–20 (default 2) |
-| `--wt-path <path>` | Use a specific Worktrunk executable |
-| `--doctor` | Check the setup and exit |
-| `-h`, `--help` / `-v`, `--version` | Show help or the version |
+| Option                             | Effect                                                    |
+| ---------------------------------- | --------------------------------------------------------- |
+| `--depth <n>`                      | Folder levels to search below each root, 0–20 (default 2) |
+| `--wt-path <path>`                 | Use a specific Worktrunk executable                       |
+| `--doctor`                         | Check the setup and exit                                  |
+| `-h`, `--help` / `-v`, `--version` | Show help or the version                                  |
 
 ## Verdicts
 
 Every worktree gets one of four verdicts. The list groups them into sections, and each row shows its Git status and the reason behind it.
 
-| Verdict | Status | Removal |
-|---|---|---|
-| **Safe** | no new commits, merged | Allowed |
+| Verdict    | Status                                                                                  | Removal                            |
+| ---------- | --------------------------------------------------------------------------------------- | ---------------------------------- |
+| **Safe**   | no new commits, merged                                                                  | Allowed                            |
 | **Review** | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history | Allowed after you read the warning |
-| **Review** | locked, status unknown | Blocked |
-| **Busy** | rebase, merge, or cherry-pick in progress; unresolved conflicts | Blocked |
-| **Broken** | folder missing | Offers to prune Git's record |
+| **Review** | locked, status unknown                                                                  | Blocked                            |
+| **Busy**   | rebase, merge, or cherry-pick in progress; unresolved conflicts                         | Blocked                            |
+| **Broken** | folder missing                                                                          | Offers to prune Git's record       |
 
 **Safe** means Worktrunk reports clean content already integrated into, or identical to, the default branch. wt-dash does not check pull request status or running processes. A lock always blocks removal, however old; unlock it yourself with `git worktree unlock` if it is stale.
 
@@ -56,21 +56,21 @@ A blocked row says what to do next, for example "finish or abort the rebase firs
 
 ## Keys
 
-| Key | Action |
-|---|---|
-| ↑/↓ or j/k | Move |
-| 1–5 or ←/→ | Show all, Safe, Review, Busy, or Broken |
-| / | Search by repo, branch, tool, or path |
-| Space | Select the focused worktree |
-| a | Select every Safe worktree in view |
-| Enter or x | Remove the selection, or the focused worktree |
-| i | Show full details for the focused worktree |
-| s / S | Change the sort (size, age, repo) / reverse it |
-| v | Group by verdict or by repo |
-| r / R | Rescan everything / remeasure the focused worktree |
-| Esc | Step back: clear the search, selection, or tab |
-| ? | Show every key |
-| q | Quit |
+| Key        | Action                                             |
+| ---------- | -------------------------------------------------- |
+| ↑/↓ or j/k | Move                                               |
+| 1–5 or ←/→ | Show all, Safe, Review, Busy, or Broken            |
+| /          | Search by repo, branch, tool, or path              |
+| Space      | Select the focused worktree                        |
+| a          | Select every Safe worktree in view                 |
+| Enter or x | Remove the selection, or the focused worktree      |
+| i          | Show full details for the focused worktree         |
+| s / S      | Change the sort (size, age, repo) / reverse it     |
+| v          | Group by verdict or by repo                        |
+| r / R      | Rescan everything / remeasure the focused worktree |
+| Esc        | Step back: clear the search, selection, or tab     |
+| ?          | Show every key                                     |
+| q          | Quit                                               |
 
 ## Removing worktrees
 

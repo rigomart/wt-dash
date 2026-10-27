@@ -9,7 +9,9 @@ export interface Style {
   underline?: boolean;
   reverse?: boolean;
 }
-export interface Seg extends Style { text: string }
+export interface Seg extends Style {
+  text: string;
+}
 export type Line = Seg[];
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -54,7 +56,12 @@ export function seg(text: string, style: Style = {}): Seg {
   return { text, ...style };
 }
 
-export function cell(value: string, width: number, style: Style = {}, align: "left" | "right" = "left"): Seg {
+export function cell(
+  value: string,
+  width: number,
+  style: Style = {},
+  align: "left" | "right" = "left",
+): Seg {
   if (width <= 0) return seg("", style);
   const text = clip(value, width);
   const gap = " ".repeat(Math.max(0, width - textWidth(text)));
@@ -73,7 +80,11 @@ export function fitLine(line: Line, width: number, fill?: Style): Line {
     if (used >= width) break;
     const text = cut(item.text, width - used);
     if (!text) continue;
-    out.push(fill ? { ...fill, ...item, ...(fill.bg && !item.bg ? { bg: fill.bg } : {}), text } : { ...item, text });
+    out.push(
+      fill
+        ? { ...fill, ...item, ...(fill.bg && !item.bg ? { bg: fill.bg } : {}), text }
+        : { ...item, text },
+    );
     used += textWidth(text);
   }
   if (used < width) out.push({ ...fill, text: " ".repeat(width - used) });
@@ -88,8 +99,16 @@ export function sliceLine(line: Line, start: number, end: number): Line {
       const size = textWidth(segment);
       if (position >= start && position + size <= end) {
         const last = out.at(-1);
-        if (last && last.fg === item.fg && last.bg === item.bg && last.bold === item.bold && last.dim === item.dim
-          && last.underline === item.underline && last.reverse === item.reverse) last.text += segment;
+        if (
+          last &&
+          last.fg === item.fg &&
+          last.bg === item.bg &&
+          last.bold === item.bold &&
+          last.dim === item.dim &&
+          last.underline === item.underline &&
+          last.reverse === item.reverse
+        )
+          last.text += segment;
         else out.push({ ...item, text: segment });
       }
       position += size;
@@ -99,11 +118,21 @@ export function sliceLine(line: Line, start: number, end: number): Line {
 }
 
 /** Place `left` and `right` on one line. The side named by `keep` survives when both do not fit. */
-export function spread(left: Line, right: Line, width: number, keep: "left" | "right" = "left", fill?: Style): Line {
+export function spread(
+  left: Line,
+  right: Line,
+  width: number,
+  keep: "left" | "right" = "left",
+  fill?: Style,
+): Line {
   const leftWidth = lineWidth(left);
   const rightWidth = lineWidth(right);
   if (leftWidth + rightWidth + 1 <= width) {
-    return fitLine([...left, seg(" ".repeat(width - leftWidth - rightWidth)), ...right], width, fill);
+    return fitLine(
+      [...left, seg(" ".repeat(width - leftWidth - rightWidth)), ...right],
+      width,
+      fill,
+    );
   }
   if (keep === "right" && rightWidth < width) {
     return fitLine([...fitLine(left, width - rightWidth - 1), seg(" "), ...right], width, fill);
@@ -131,7 +160,10 @@ export function wrap(value: string, width: number): string[] {
 export function rule(width: number, label = "", style: Style = {}): Line {
   if (!label) return [seg("─".repeat(Math.max(0, width)), { dim: true })];
   const head = "── ";
-  return fitLine([seg(head, { dim: true }), seg(label, style), seg(" " + "─".repeat(width), { dim: true })], width);
+  return fitLine(
+    [seg(head, { dim: true }), seg(label, style), seg(" " + "─".repeat(width), { dim: true })],
+    width,
+  );
 }
 
 export function toStyledText(lines: Line[]): StyledText {
@@ -140,9 +172,18 @@ export function toStyledText(lines: Line[]): StyledText {
     if (index > 0) chunks.push({ __isChunk: true, text: "\n" });
     for (const item of line) {
       if (!item.text) continue;
-      const attributes = (item.bold ? TextAttributes.BOLD : 0) | (item.dim ? TextAttributes.DIM : 0)
-        | (item.underline ? TextAttributes.UNDERLINE : 0) | (item.reverse ? TextAttributes.INVERSE : 0);
-      chunks.push({ __isChunk: true, text: item.text, fg: item.fg, bg: item.bg, attributes: attributes || undefined });
+      const attributes =
+        (item.bold ? TextAttributes.BOLD : 0) |
+        (item.dim ? TextAttributes.DIM : 0) |
+        (item.underline ? TextAttributes.UNDERLINE : 0) |
+        (item.reverse ? TextAttributes.INVERSE : 0);
+      chunks.push({
+        __isChunk: true,
+        text: item.text,
+        fg: item.fg,
+        bg: item.bg,
+        attributes: attributes || undefined,
+      });
     }
   });
   return new StyledText(chunks);

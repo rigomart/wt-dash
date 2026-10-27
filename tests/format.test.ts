@@ -5,10 +5,36 @@ import { clip, fitLine, lineWidth, middle, seg, spread, wrap } from "../src/ui/l
 
 function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
   return {
-    id: "a", repoPath: "/r", repoName: "r", path: "/r/w", branch: "b", headSha: "abc", committedAt: null, tool: "Claude",
-    changes: { staged: false, modified: false, untracked: false, renamed: false, deleted: false, conflicted: false },
-    upstreamAhead: 0, mainState: "integrated", lockReason: null, mainAhead: null, defaultBranch: "main", mainBase: "main", locked: false, prunable: false, operation: null,
-    sizeKiB: null, sizeMeasuredAt: null, verdict: "Safe", reason: "", ...overrides,
+    id: "a",
+    repoPath: "/r",
+    repoName: "r",
+    path: "/r/w",
+    branch: "b",
+    headSha: "abc",
+    committedAt: null,
+    tool: "Claude",
+    changes: {
+      staged: false,
+      modified: false,
+      untracked: false,
+      renamed: false,
+      deleted: false,
+      conflicted: false,
+    },
+    upstreamAhead: 0,
+    mainState: "integrated",
+    lockReason: null,
+    mainAhead: null,
+    defaultBranch: "main",
+    mainBase: "main",
+    locked: false,
+    prunable: false,
+    operation: null,
+    sizeKiB: null,
+    sizeMeasuredAt: null,
+    verdict: "Safe",
+    reason: "",
+    ...overrides,
   };
 }
 
@@ -19,7 +45,9 @@ test("one Git status explains the verdict in a few plain words", () => {
   expect(statusLabel(row({ mainState: "ahead" }))).toBe("unmerged commits");
   expect(statusLabel(row({ locked: true }))).toBe("locked");
   expect(statusLabel(row({ upstreamAhead: 2 }))).toBe("unpushed commits");
-  expect(statusLabel(row({ changes: { ...row().changes!, untracked: true } }))).toBe("uncommitted changes");
+  expect(statusLabel(row({ changes: { ...row().changes!, untracked: true } }))).toBe(
+    "uncommitted changes",
+  );
 });
 
 test("relative times never read like 'now ago'", () => {
@@ -35,7 +63,10 @@ test("middle truncation keeps both ends of a long branch", () => {
 });
 
 test("wrapping prefers path separators", () => {
-  expect(wrap("~/projects/my-app/.claude/worktrees/feature-login", 30)).toEqual(["~/projects/my-app/.claude/", "worktrees/feature-login"]);
+  expect(wrap("~/projects/my-app/.claude/worktrees/feature-login", 30)).toEqual([
+    "~/projects/my-app/.claude/",
+    "worktrees/feature-login",
+  ]);
 });
 
 test("lines are cut and padded to an exact width, including wide characters", () => {
@@ -49,7 +80,6 @@ test("spread keeps the requested side when both do not fit", () => {
   expect(text(spread([seg("left side text")], [seg("q quit")], 12, "right"))).toBe("left  q quit");
   expect(text(spread([seg("left side text")], [seg("q quit")], 12, "left"))).toBe("left side te");
 });
-
 
 test("narrow STATUS cells truncate only the single Git label", () => {
   expect(statusLabel(row({ operation: "rebase" }), 10)).toBe("rebase in…");

@@ -23,7 +23,9 @@ export function createSizeService(
       active++;
       return true;
     }
-    await new Promise<void>((resolve) => (hadEntry ? cachedWaiters : uncachedWaiters).push(resolve));
+    await new Promise<void>((resolve) =>
+      (hadEntry ? cachedWaiters : uncachedWaiters).push(resolve),
+    );
     return !closed;
   }
 
@@ -38,14 +40,16 @@ export function createSizeService(
   }
 
   function persist(): Promise<void> {
-    writes = writes.then(async () => {
-      await mkdir(dirname(cachePath), { recursive: true });
-      const temporary = `${cachePath}.tmp-${process.pid}-${++writeNumber}`;
-      await writeFile(temporary, JSON.stringify(Object.fromEntries(cache), null, 2));
-      await rename(temporary, cachePath);
-    }).catch(() => {
-      // A cache write failure must not hide a measured worktree.
-    });
+    writes = writes
+      .then(async () => {
+        await mkdir(dirname(cachePath), { recursive: true });
+        const temporary = `${cachePath}.tmp-${process.pid}-${++writeNumber}`;
+        await writeFile(temporary, JSON.stringify(Object.fromEntries(cache), null, 2));
+        await rename(temporary, cachePath);
+      })
+      .catch(() => {
+        // A cache write failure must not hide a measured worktree.
+      });
     return writes;
   }
 
@@ -58,7 +62,11 @@ export function createSizeService(
         for (const [path, raw] of Object.entries(parsed)) {
           if (typeof raw !== "object" || raw === null) continue;
           const entry = raw as Record<string, unknown>;
-          if (Number.isSafeInteger(entry.sizeKiB) && (entry.sizeKiB as number) >= 0 && typeof entry.measuredAt === "string") {
+          if (
+            Number.isSafeInteger(entry.sizeKiB) &&
+            (entry.sizeKiB as number) >= 0 &&
+            typeof entry.measuredAt === "string"
+          ) {
             cache.set(path, { sizeKiB: entry.sizeKiB as number, measuredAt: entry.measuredAt });
           }
         }
@@ -73,7 +81,7 @@ export function createSizeService(
       if (closed) return Promise.resolve(null);
       const hadEntry = cache.has(path);
       const task = (async (): Promise<SizeEntry | null> => {
-        if (!await acquire(hadEntry)) return null;
+        if (!(await acquire(hadEntry))) return null;
         try {
           const result = await runner("/usr/bin/du", ["-sk", path], abort.signal);
           if (result.exitCode !== 0) return null;

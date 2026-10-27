@@ -3,11 +3,24 @@
   "version": "0.1.0",
   "description": "A macOS terminal dashboard for reviewing and cleaning up Git worktrees across repositories.",
   "license": "MIT",
-  "os": ["darwin"],
-  "cpu": ["arm64", "x64"],
-  "engines": { "bun": ">=1.3.14" },
-  "bin": { "wt-dash": "src/index.ts" },
-  "files": ["src", "README.md", "LICENSE"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "bin": {
+    "wt-dash": "src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",

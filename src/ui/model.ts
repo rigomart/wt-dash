@@ -20,13 +20,28 @@ const DESCENDING_BY_DEFAULT: Record<SortKey, boolean> = { size: true, age: true,
 export const VERDICTS: Verdict[] = ["Safe", "Review", "Busy", "Broken"];
 
 export type Tone = "info" | "ok" | "warn" | "error";
-export interface Toast { text: string; tone: Tone; until: number }
+export interface Toast {
+  text: string;
+  tone: Tone;
+  until: number;
+}
 export type RunStatus = "waiting" | "removing" | "removed" | "failed" | "skipped" | "unverified";
-export type FileState = { kind: "loading" } | { kind: "ready"; report: FileReport } | { kind: "error"; message: string };
+export type FileState =
+  | { kind: "loading" }
+  | { kind: "ready"; report: FileReport }
+  | { kind: "error"; message: string };
 
 export type Confirm = { openedAt: number } & (
-  | { kind: "remove"; plan: RemovalPlan; ready: RemovalEntry[]; blocked: RemovalEntry[]; deleteUnmerged: boolean; reap: boolean }
-  | { kind: "prune"; plan: PrunePlan });
+  | {
+      kind: "remove";
+      plan: RemovalPlan;
+      ready: RemovalEntry[];
+      blocked: RemovalEntry[];
+      deleteUnmerged: boolean;
+      reap: boolean;
+    }
+  | { kind: "prune"; plan: PrunePlan }
+);
 
 /** Milliseconds the dialog must be open before enter confirms it. */
 export const CONFIRM_ARM_MS = 400;
@@ -72,7 +87,11 @@ export interface UiState {
   frame: number;
 }
 
-export interface Key { name: string; char: string; ctrl: boolean }
+export interface Key {
+  name: string;
+  char: string;
+  ctrl: boolean;
+}
 
 export type UiEvent =
   | { type: "key"; key: Key }
@@ -93,7 +112,12 @@ export type Effect =
   | { type: "refresh"; repos?: string[] }
   | { type: "remeasure"; id: string }
   | { type: "prepareRemoval"; token: number; rows: WorktreeRow[] }
-  | { type: "executeRemoval"; jobId: number; plan: RemovalPlan; choices: Record<string, RemovalChoice> }
+  | {
+      type: "executeRemoval";
+      jobId: number;
+      plan: RemovalPlan;
+      choices: Record<string, RemovalChoice>;
+    }
   | { type: "preparePrune"; token: number; repoPath: string }
   | { type: "executePrune"; plan: PrunePlan };
 
@@ -107,14 +131,38 @@ export interface Context {
   canExpand: boolean;
 }
 
-export interface Result { state: UiState; effects: Effect[] }
+export interface Result {
+  state: UiState;
+  effects: Effect[];
+}
 
 export function initialState(): UiState {
   return {
-    tab: "All", search: "", searching: false, sort: "size", descending: true, grouped: false,
-    focusId: null, moved: false, expanded: false, detailTop: 0, help: false, selected: new Set(), toast: null,
-    pending: null, token: 0, confirm: null, jobs: [], quitAfterJobs: false, pruning: false, gone: new Set(), goneSince: -1, failures: {},
-    generation: -1, files: {}, frame: 0,
+    tab: "All",
+    search: "",
+    searching: false,
+    sort: "size",
+    descending: true,
+    grouped: false,
+    focusId: null,
+    moved: false,
+    expanded: false,
+    detailTop: 0,
+    help: false,
+    selected: new Set(),
+    toast: null,
+    pending: null,
+    token: 0,
+    confirm: null,
+    jobs: [],
+    quitAfterJobs: false,
+    pruning: false,
+    gone: new Set(),
+    goneSince: -1,
+    failures: {},
+    generation: -1,
+    files: {},
+    frame: 0,
   };
 }
 
@@ -152,18 +200,32 @@ export function listView(state: UiState, snapshot: DashboardSnapshot): ListView 
     search: state.search,
     sort: { key: state.sort, direction: state.descending ? "desc" : "asc" },
   });
-  const counts: Record<Tab, number> = { All: matching.length, Safe: 0, Review: 0, Busy: 0, Broken: 0 };
+  const counts: Record<Tab, number> = {
+    All: matching.length,
+    Safe: 0,
+    Review: 0,
+    Busy: 0,
+    Broken: 0,
+  };
   let safeKiB = 0;
   for (const row of matching) {
     counts[tabOf(row.verdict)]++;
     if (tabOf(row.verdict) === "Safe") safeKiB += row.sizeKiB ?? 0;
   }
-  const filtered = state.tab === "All" ? matching : matching.filter((row) => tabOf(row.verdict) === state.tab);
+  const filtered =
+    state.tab === "All" ? matching : matching.filter((row) => tabOf(row.verdict) === state.tab);
   const rank = (row: WorktreeRow) => VERDICTS.indexOf(row.verdict);
   const sections: Section[] = state.grouped
-    ? groupByRepo(filtered).map((group) => ({ kind: "repo", ...group, rows: [...group.rows].sort((a, b) => rank(a) - rank(b)) }))
-    : VERDICTS.map((verdict): Section => ({ kind: "verdict", verdict, rows: filtered.filter((row) => row.verdict === verdict) }))
-      .filter((section) => section.rows.length);
+    ? groupByRepo(filtered).map((group) => ({
+        kind: "repo",
+        ...group,
+        rows: [...group.rows].sort((a, b) => rank(a) - rank(b)),
+      }))
+    : VERDICTS.map((verdict): Section => ({
+        kind: "verdict",
+        verdict,
+        rows: filtered.filter((row) => row.verdict === verdict),
+      })).filter((section) => section.rows.length);
   const rows = sections.flatMap((section) => section.rows);
   const focus = (state.moved && rows.find((row) => row.id === state.focusId)) || rows[0] || null;
   return { rows, sections, counts, safeKiB, focus };
@@ -178,19 +240,31 @@ export function inJob(state: UiState, id: string): boolean {
 }
 
 export function spinning(state: UiState, snapshot: DashboardSnapshot): boolean {
-  return snapshot.progress.phase === "scanning" || state.pending !== null || state.jobs.length > 0 || state.pruning;
+  return (
+    snapshot.progress.phase === "scanning" ||
+    state.pending !== null ||
+    state.jobs.length > 0 ||
+    state.pruning
+  );
 }
 
 const same = (state: UiState): Result => ({ state, effects: [] });
 const quit = (state: UiState): Result => ({ state, effects: [{ type: "quit" }] });
 
-function toast(state: UiState, ctx: Context, text: string, tone: Tone = "info", ms = 4000): UiState {
+function toast(
+  state: UiState,
+  ctx: Context,
+  text: string,
+  tone: Tone = "info",
+  ms = 4000,
+): UiState {
   return { ...state, toast: { text, tone, until: ctx.now + ms } };
 }
 
 export function update(state: UiState, event: UiEvent, ctx: Context): Result {
   switch (event.type) {
-    case "key": return onKey(state, event.key, ctx);
+    case "key":
+      return onKey(state, event.key, ctx);
     case "tick": {
       let next = state;
       if (state.toast && ctx.now >= state.toast.until) next = { ...next, toast: null };
@@ -199,11 +273,14 @@ export function update(state: UiState, event: UiEvent, ctx: Context): Result {
     }
     case "snapshot": {
       let next = state;
-      if (ctx.snapshot.generation !== state.generation) next = { ...next, generation: ctx.snapshot.generation, files: {} };
+      if (ctx.snapshot.generation !== state.generation)
+        next = { ...next, generation: ctx.snapshot.generation, files: {} };
       if (ctx.snapshot.progress.phase === "complete") {
         const ids = new Set(ctx.snapshot.rows.map((row) => row.id));
-        if ([...state.selected].some((id) => !ids.has(id))) next = { ...next, selected: new Set([...state.selected].filter((id) => ids.has(id))) };
-        if (state.gone.size && ctx.snapshot.generation > state.goneSince) next = { ...next, gone: new Set() };
+        if ([...state.selected].some((id) => !ids.has(id)))
+          next = { ...next, selected: new Set([...state.selected].filter((id) => ids.has(id))) };
+        if (state.gone.size && ctx.snapshot.generation > state.goneSince)
+          next = { ...next, gone: new Set() };
       }
       return same(next);
     }
@@ -211,41 +288,99 @@ export function update(state: UiState, event: UiEvent, ctx: Context): Result {
       if (event.generation !== state.generation) return same(state);
       return same({ ...state, files: { ...state.files, [event.id]: event.state } });
     case "planReady": {
-      if (state.pending?.kind !== "removal" || state.pending.token !== event.token) return same(state);
+      if (state.pending?.kind !== "removal" || state.pending.token !== event.token)
+        return same(state);
       const ready = event.plan.entries.filter((entry) => !entry.blockedReason);
       const blocked = event.plan.entries.filter((entry) => entry.blockedReason);
       if (!ready.length) {
         const first = blocked[0];
-        return same(toast({ ...state, pending: null }, ctx,
-          first ? `Can't remove ${branchLabel(first.row)}: ${first.blockedReason}` : "Nothing to remove", "warn", 8000));
+        return same(
+          toast(
+            { ...state, pending: null },
+            ctx,
+            first
+              ? `Can't remove ${branchLabel(first.row)}: ${first.blockedReason}`
+              : "Nothing to remove",
+            "warn",
+            8000,
+          ),
+        );
       }
-      return same({ ...state, pending: null, toast: null, help: false,
-        confirm: { kind: "remove", openedAt: ctx.now, plan: event.plan, ready, blocked, deleteUnmerged: false, reap: false } });
+      return same({
+        ...state,
+        pending: null,
+        toast: null,
+        help: false,
+        confirm: {
+          kind: "remove",
+          openedAt: ctx.now,
+          plan: event.plan,
+          ready,
+          blocked,
+          deleteUnmerged: false,
+          reap: false,
+        },
+      });
     }
     case "planFailed":
       if (state.pending?.token !== event.token) return same(state);
-      return same(toast({ ...state, pending: null }, ctx, `Couldn't check the selection: ${event.error}`, "error", 8000));
+      return same(
+        toast(
+          { ...state, pending: null },
+          ctx,
+          `Couldn't check the selection: ${event.error}`,
+          "error",
+          8000,
+        ),
+      );
     case "progress": {
       const job = state.jobs.find((item) => event.id in item.status);
       if (!job) return same(state);
       const next = { ...job, status: { ...job.status, [event.id]: event.status } };
-      return same({ ...state, jobs: state.jobs.map((item) => item === job ? next : item) });
+      return same({ ...state, jobs: state.jobs.map((item) => (item === job ? next : item)) });
     }
-    case "removalDone": return finishJob(state, event.jobId, event.result, null, ctx);
-    case "removalFailed": return finishJob(state, event.jobId, null, event.error, ctx);
+    case "removalDone":
+      return finishJob(state, event.jobId, event.result, null, ctx);
+    case "removalFailed":
+      return finishJob(state, event.jobId, null, event.error, ctx);
     case "pruneReady":
-      if (state.pending?.kind !== "prune" || state.pending.token !== event.token) return same(state);
+      if (state.pending?.kind !== "prune" || state.pending.token !== event.token)
+        return same(state);
       if (!event.plan.records.length) {
-        return same(toast({ ...state, pending: null }, ctx, `Nothing to prune in ${repoName(event.plan.repoPath)}`));
+        return same(
+          toast(
+            { ...state, pending: null },
+            ctx,
+            `Nothing to prune in ${repoName(event.plan.repoPath)}`,
+          ),
+        );
       }
-      return same({ ...state, pending: null, toast: null, help: false, confirm: { kind: "prune", openedAt: ctx.now, plan: event.plan } });
+      return same({
+        ...state,
+        pending: null,
+        toast: null,
+        help: false,
+        confirm: { kind: "prune", openedAt: ctx.now, plan: event.plan },
+      });
     case "pruneFailed":
       if (event.token !== null && state.pending?.token !== event.token) return same(state);
-      return same(toast({ ...state, pending: null, pruning: false }, ctx, `Prune failed: ${event.error}`, "error", 8000));
+      return same(
+        toast(
+          { ...state, pending: null, pruning: false },
+          ctx,
+          `Prune failed: ${event.error}`,
+          "error",
+          8000,
+        ),
+      );
     case "pruneDone":
       return {
-        state: toast({ ...state, pruning: false }, ctx,
-          `Pruned ${countLabel(event.plan.records.length, "record")} in ${repoName(event.plan.repoPath)}`, "ok"),
+        state: toast(
+          { ...state, pruning: false },
+          ctx,
+          `Pruned ${countLabel(event.plan.records.length, "record")} in ${repoName(event.plan.repoPath)}`,
+          "ok",
+        ),
         effects: [{ type: "refresh", repos: [event.plan.repoPath] }],
       };
   }
@@ -253,7 +388,13 @@ export function update(state: UiState, event: UiEvent, ctx: Context): Result {
 
 const repoName = (path: string) => path.split("/").at(-1) ?? path;
 
-function finishJob(state: UiState, jobId: number, result: RemovalResult | null, error: string | null, ctx: Context): Result {
+function finishJob(
+  state: UiState,
+  jobId: number,
+  result: RemovalResult | null,
+  error: string | null,
+  ctx: Context,
+): Result {
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) return same(state);
   const failures = { ...state.failures };
@@ -276,16 +417,29 @@ function finishJob(state: UiState, jobId: number, result: RemovalResult | null, 
   }
   if (error) for (const id of job.order) if (!gone.has(id)) failures[id] = error;
   const measured = result?.freedKiB;
-  const space = measured !== null && measured !== undefined ? `freed ${sizeLabel(Math.max(0, measured))}` : `up to ${sizeLabel(freed)} freed`;
+  const space =
+    measured !== null && measured !== undefined
+      ? `freed ${sizeLabel(Math.max(0, measured))}`
+      : `up to ${sizeLabel(freed)} freed`;
   let summary: string;
   let tone: Tone;
-  if (error) { summary = `Removal stopped: ${error}`; tone = "error"; }
-  else if (!problems.length) { summary = `Removed ${countLabel(removed, "worktree")} · ${space}`; tone = "ok"; }
-  else {
+  if (error) {
+    summary = `Removal stopped: ${error}`;
+    tone = "error";
+  } else if (!problems.length) {
+    summary = `Removed ${countLabel(removed, "worktree")} · ${space}`;
+    tone = "ok";
+  } else {
     summary = `Removed ${removed} of ${job.order.length} · ${problems.length === 1 ? problems[0] : `${problems.length} worktrees`} not removed, see details`;
     tone = "warn";
   }
-  const repos = [...new Set(job.plan.entries.filter((entry) => job.order.includes(entry.row.id)).map((entry) => entry.row.repoPath))];
+  const repos = [
+    ...new Set(
+      job.plan.entries
+        .filter((entry) => job.order.includes(entry.row.id))
+        .map((entry) => entry.row.repoPath),
+    ),
+  ];
   const effects: Effect[] = [{ type: "refresh", repos }];
   const jobs = state.jobs.filter((item) => item !== job);
   if (!jobs.length && state.quitAfterJobs) effects.push({ type: "quit" });
@@ -308,7 +462,15 @@ function onKey(state: UiState, key: Key, ctx: Context): Result {
 function quitRequest(state: UiState, ctx: Context): Result {
   if (state.pruning) return same(toast(state, ctx, "Still pruning; try again in a moment", "warn"));
   if (state.jobs.length) {
-    return same(toast({ ...stopJobs(state), quitAfterJobs: true }, ctx, "Quitting after the current worktree is removed", "warn", 60_000));
+    return same(
+      toast(
+        { ...stopJobs(state), quitAfterJobs: true },
+        ctx,
+        "Quitting after the current worktree is removed",
+        "warn",
+        60_000,
+      ),
+    );
   }
   return quit(state);
 }
@@ -323,23 +485,33 @@ const isEnter = (key: Key) => key.name === "return" || key.name === "enter";
 
 function move(state: UiState, view: ListView, target: number | "first" | "last"): UiState {
   if (!view.rows.length) return state;
-  const index = Math.max(0, view.rows.findIndex((row) => row.id === view.focus?.id));
+  const index = Math.max(
+    0,
+    view.rows.findIndex((row) => row.id === view.focus?.id),
+  );
   const last = view.rows.length - 1;
-  const next = target === "first" ? 0 : target === "last" ? last : Math.max(0, Math.min(last, index + target));
+  const next =
+    target === "first" ? 0 : target === "last" ? last : Math.max(0, Math.min(last, index + target));
   return { ...state, focusId: view.rows[next]!.id, moved: true, detailTop: 0 };
 }
 
 function onConfirmKey(state: UiState, confirm: Confirm, key: Key, ctx: Context): Result {
   if (key.name === "escape" || key.char === "n") return same({ ...state, confirm: null });
   if (key.char === "q") return quitRequest(state, ctx);
-  const confirmed = key.char === "y" || (isEnter(key) && ctx.now - confirm.openedAt >= CONFIRM_ARM_MS);
+  const confirmed =
+    key.char === "y" || (isEnter(key) && ctx.now - confirm.openedAt >= CONFIRM_ARM_MS);
   if (confirm.kind === "prune") {
     if (!confirmed) return same(state);
-    return { state: { ...state, confirm: null, pruning: true }, effects: [{ type: "executePrune", plan: confirm.plan }] };
+    return {
+      state: { ...state, confirm: null, pruning: true },
+      effects: [{ type: "executePrune", plan: confirm.plan }],
+    };
   }
   if (key.char === "D") {
     if (!confirm.ready.some((entry) => entry.branchWillBeRetained)) {
-      return same(toast(state, ctx, "Every branch here is merged or detached; nothing extra to delete"));
+      return same(
+        toast(state, ctx, "Every branch here is merged or detached; nothing extra to delete"),
+      );
     }
     return same({ ...state, confirm: { ...confirm, deleteUnmerged: !confirm.deleteUnmerged } });
   }
@@ -350,7 +522,7 @@ function onConfirmKey(state: UiState, confirm: Confirm, key: Key, ctx: Context):
     const ready = !entry.blockedReason;
     choices[entry.row.id] = {
       include: ready,
-        discardChanges: ready && entry.requiresDiscard,
+      discardChanges: ready && entry.requiresDiscard,
       forceDeleteBranch: ready && confirm.deleteUnmerged && entry.branchWillBeRetained,
       reapProcesses: ready && confirm.reap,
     };
@@ -361,16 +533,31 @@ function onConfirmKey(state: UiState, confirm: Confirm, key: Key, ctx: Context):
   const token = state.token + 1;
   const waitsForRunningBatch = state.jobs.length > 0;
   const job: Job = {
-    id: token, plan: confirm.plan, order, stopping: false,
+    id: token,
+    plan: confirm.plan,
+    order,
+    stopping: false,
     status: Object.fromEntries(order.map((id) => [id, "waiting" as RunStatus])),
   };
   const next: UiState = {
-    ...state, token, confirm: null, jobs: [...state.jobs, job], failures,
+    ...state,
+    token,
+    confirm: null,
+    jobs: [...state.jobs, job],
+    failures,
     selected: new Set([...state.selected].filter((id) => !order.includes(id))),
   };
   const focused = keepFocusNear(next, state, ctx);
   return {
-    state: waitsForRunningBatch ? toast(focused, ctx, `Queued ${countLabel(order.length, "worktree")} after the current removal`, "info", 3000) : focused,
+    state: waitsForRunningBatch
+      ? toast(
+          focused,
+          ctx,
+          `Queued ${countLabel(order.length, "worktree")} after the current removal`,
+          "info",
+          3000,
+        )
+      : focused,
     effects: [{ type: "executeRemoval", jobId: job.id, plan: confirm.plan, choices }],
   };
 }
@@ -381,8 +568,12 @@ function keepFocusNear(next: UiState, before: UiState, ctx: Context): UiState {
   const remaining = new Set(listView(next, ctx.snapshot).rows.map((row) => row.id));
   if (remaining.has(old.focus.id)) return { ...next, focusId: old.focus.id, moved: true };
   const index = old.rows.indexOf(old.focus);
-  const target = old.rows.slice(index + 1).find((row) => remaining.has(row.id))
-    ?? old.rows.slice(0, index).reverse().find((row) => remaining.has(row.id));
+  const target =
+    old.rows.slice(index + 1).find((row) => remaining.has(row.id)) ??
+    old.rows
+      .slice(0, index)
+      .reverse()
+      .find((row) => remaining.has(row.id));
   return target ? { ...next, focusId: target.id, moved: true, detailTop: 0 } : next;
 }
 
@@ -396,13 +587,15 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
     if (key.ctrl && key.name === "u") return same({ ...state, search: "" });
     if (key.name === "up") return same(move(state, view, -1));
     if (key.name === "down") return same(move(state, view, 1));
-    if (!key.ctrl && key.char.length === 1 && key.char >= " ") return same({ ...state, search: state.search + key.char });
+    if (!key.ctrl && key.char.length === 1 && key.char >= " ")
+      return same({ ...state, search: state.search + key.char });
     return same(state);
   }
   if (state.expanded) {
     if (isUp(key)) return same({ ...state, detailTop: Math.max(0, state.detailTop - 1) });
     if (isDown(key)) return same({ ...state, detailTop: state.detailTop + 1 });
-    if (key.char === "i" || key.name === "escape") return same({ ...state, expanded: false, detailTop: 0 });
+    if (key.char === "i" || key.name === "escape")
+      return same({ ...state, expanded: false, detailTop: 0 });
   }
   if (key.char === "q") return quitRequest(state, ctx);
   if (key.char === "?") return same({ ...state, help: true });
@@ -416,7 +609,10 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
   if (/^[1-5]$/.test(key.char)) return same({ ...state, tab: TABS[Number(key.char) - 1]! });
   if (key.name === "left" || key.char === "h" || key.name === "right" || key.char === "l") {
     const step = key.name === "left" || key.char === "h" ? -1 : 1;
-    return same({ ...state, tab: TABS[(TABS.indexOf(state.tab) + step + TABS.length) % TABS.length]! });
+    return same({
+      ...state,
+      tab: TABS[(TABS.indexOf(state.tab) + step + TABS.length) % TABS.length]!,
+    });
   }
   if (key.char === "s") {
     const sort = SORT_KEYS[(SORT_KEYS.indexOf(state.sort) + 1) % SORT_KEYS.length]!;
@@ -425,13 +621,17 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
   if (key.char === "S") return same({ ...state, descending: !state.descending });
   if (key.char === "v") return same({ ...state, grouped: !state.grouped });
   if (key.char === "i") {
-    if (!ctx.canExpand) return same(toast(state, ctx, "All details are already on screen", "info", 2500));
+    if (!ctx.canExpand)
+      return same(toast(state, ctx, "All details are already on screen", "info", 2500));
     return same({ ...state, expanded: true, detailTop: 0 });
   }
   if (key.char === "r") return { state, effects: [{ type: "refresh" }] };
   if (key.char === "R") {
     if (!focus) return same(state);
-    return { state: toast(state, ctx, `Measuring ${branchLabel(focus)}…`, "info", 2500), effects: [{ type: "remeasure", id: focus.id }] };
+    return {
+      state: toast(state, ctx, `Measuring ${branchLabel(focus)}…`, "info", 2500),
+      effects: [{ type: "remeasure", id: focus.id }],
+    };
   }
   if (key.name === "escape") return same(clearStep(state, ctx));
   if (key.char === " " || key.name === "space") return same(toggleSelect(state, focus, ctx));
@@ -451,7 +651,12 @@ function clearStep(state: UiState, ctx: Context): UiState {
   if (state.pending) return toast({ ...state, pending: null }, ctx, "Cancelled");
   if (state.search) return { ...state, search: "" };
   if (state.expanded) return { ...state, expanded: false };
-  if (state.selected.size) return toast({ ...state, selected: new Set() }, ctx, `Cleared ${countLabel(state.selected.size, "selection")}`);
+  if (state.selected.size)
+    return toast(
+      { ...state, selected: new Set() },
+      ctx,
+      `Cleared ${countLabel(state.selected.size, "selection")}`,
+    );
   if (state.tab !== "All") return { ...state, tab: "All" };
   if (state.jobs.some((job) => !job.stopping)) {
     return toast(stopJobs(state), ctx, "Stopping after the current worktree", "warn", 60_000);
@@ -483,11 +688,20 @@ function selectAllSafe(state: UiState, view: ListView, ctx: Context): UiState {
   const selected = new Set(state.selected);
   if (safe.every((row) => selected.has(row.id))) {
     for (const row of safe) selected.delete(row.id);
-    return toast({ ...state, selected }, ctx, `Cleared ${countLabel(safe.length, "Safe worktree")}`);
+    return toast(
+      { ...state, selected },
+      ctx,
+      `Cleared ${countLabel(safe.length, "Safe worktree")}`,
+    );
   }
   for (const row of safe) selected.add(row.id);
   const kib = safe.reduce((sum, row) => sum + (row.sizeKiB ?? 0), 0);
-  return toast({ ...state, selected }, ctx, `Selected ${countLabel(safe.length, "Safe worktree")} · up to ${sizeLabel(kib)}`, "ok");
+  return toast(
+    { ...state, selected },
+    ctx,
+    `Selected ${countLabel(safe.length, "Safe worktree")} · up to ${sizeLabel(kib)}`,
+    "ok",
+  );
 }
 
 /** x removes the selection, or the focused row when nothing is selected. */
@@ -498,12 +712,22 @@ function startRemoval(state: UiState, focus: WorktreeRow | null, ctx: Context): 
   if (!rows.length) {
     if (!focus) return same(state);
     const block = selectBlock(state, focus);
-    if (block) return same(toast(state, ctx, `Can't remove ${branchLabel(focus)}: ${block}`, "warn", 6000));
+    if (block)
+      return same(toast(state, ctx, `Can't remove ${branchLabel(focus)}: ${block}`, "warn", 6000));
     rows = [focus];
   }
   const token = state.token + 1;
   return {
-    state: { ...state, token, toast: null, pending: { kind: "removal", token, label: `Checking ${countLabel(rows.length, "worktree")}…` } },
+    state: {
+      ...state,
+      token,
+      toast: null,
+      pending: {
+        kind: "removal",
+        token,
+        label: `Checking ${countLabel(rows.length, "worktree")}…`,
+      },
+    },
     effects: [{ type: "prepareRemoval", token, rows }],
   };
 }
@@ -511,10 +735,16 @@ function startRemoval(state: UiState, focus: WorktreeRow | null, ctx: Context): 
 function startPrune(state: UiState, focus: WorktreeRow | null, ctx: Context): Result {
   if (!ctx.canAct || !focus) return same(state);
   if (state.pending || state.pruning) return same(state);
-  if (state.jobs.length) return same(toast(state, ctx, "A removal is still running; prune when it finishes"));
+  if (state.jobs.length)
+    return same(toast(state, ctx, "A removal is still running; prune when it finishes"));
   const token = state.token + 1;
   return {
-    state: { ...state, token, toast: null, pending: { kind: "prune", token, label: `Checking ${focus.repoName} for missing worktrees…` } },
+    state: {
+      ...state,
+      token,
+      toast: null,
+      pending: { kind: "prune", token, label: `Checking ${focus.repoName} for missing worktrees…` },
+    },
     effects: [{ type: "preparePrune", token, repoPath: focus.repoPath }],
   };
 }

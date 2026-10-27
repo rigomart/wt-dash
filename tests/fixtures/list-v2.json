@@ -14,20 +14,44 @@
   "items": [
     {
       "branch": "main",
-      "head": { "sha": "aaa", "short_sha": "aaa", "subject": "main", "committed_at": "2026-09-28T00:00:00Z" },
+      "head": {
+        "sha": "aaa",
+        "short_sha": "aaa",
+        "subject": "main",
+        "committed_at": "2026-09-28T00:00:00Z"
+      },
       "worktree": {
         "path": "/Users/test/projects/sample",
         "main": true,
-        "changes": { "staged": false, "modified": false, "untracked": false, "renamed": false, "deleted": false, "conflicted": false }
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false
+        }
       }
     },
     {
       "branch": "feature/name",
-      "head": { "sha": "bbb", "short_sha": "bbb", "subject": "feature", "committed_at": "2026-09-27T00:00:00Z" },
+      "head": {
+        "sha": "bbb",
+        "short_sha": "bbb",
+        "subject": "feature",
+        "committed_at": "2026-09-27T00:00:00Z"
+      },
       "worktree": {
         "path": "/Users/test/projects/sample/.claude/worktrees/a space",
         "main": false,
-        "changes": { "staged": false, "modified": false, "untracked": false, "renamed": false, "deleted": false, "conflicted": false }
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false
+        }
       },
       "default_branch": { "ahead": 0, "behind": 1, "integration": { "reason": "patch_id_match" } },
       "upstream": { "ahead": 0, "behind": 0 },
@@ -35,12 +59,24 @@
     },
     {
       "branch": null,
-      "head": { "sha": "ccc", "short_sha": "ccc", "subject": "detached", "committed_at": "2026-09-26T00:00:00Z" },
+      "head": {
+        "sha": "ccc",
+        "short_sha": "ccc",
+        "subject": "detached",
+        "committed_at": "2026-09-26T00:00:00Z"
+      },
       "worktree": {
         "path": "/Users/test/.codex/worktrees/abc/sample",
         "main": false,
         "detached": true,
-        "changes": { "staged": false, "modified": false, "untracked": false, "renamed": false, "deleted": false, "conflicted": false }
+        "changes": {
+          "staged": false,
+          "modified": false,
+          "untracked": false,
+          "renamed": false,
+          "deleted": false,
+          "conflicted": false
+        }
       },
       "display": { "state": "ahead" }
     }
