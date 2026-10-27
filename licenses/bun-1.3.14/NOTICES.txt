@@ -5,7 +5,7 @@ JavaScriptCore source: https://github.com/oven-sh/WebKit/tree/5488984d20e0dbfe4b
 
 These texts include the native libraries and packaged Rust dependency notices.
 Byte-identical texts are reproduced once, with every component and source listed.
-For rebuilding the application with a modified runtime, see docs/RELEASING.md.
+For rebuilding the application with a modified runtime, see "Rebuilding with a modified Bun runtime" in CONTRIBUTING.md.
 
 ========================================================================
 License text SHA-256: 827c8d8fc207c2392794eef9e00fe246f9f61fdcc132556c275be3dd8c3cd97f

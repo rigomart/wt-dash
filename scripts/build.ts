@@ -30,7 +30,7 @@ if (!result.success) throw new AggregateError(result.logs, "Compilation failed")
 // Retain the licenses for production packages and the native libraries they include.
 const visited = new Set<string>();
 const notices: string[] = [
-  `wt-dash ${metadata.version} — third-party notices\n\nBuilt with Bun ${Bun.version}.\nBun licensing and runtime source: https://github.com/oven-sh/bun/tree/bun-v${Bun.version}\nRebuilding: see docs/RELEASING.md in the wt-dash source distribution.\n`,
+  `wt-dash ${metadata.version} — third-party notices\n\nBuilt with Bun ${Bun.version}.\nBun licensing and runtime source: https://github.com/oven-sh/bun/tree/bun-v${Bun.version}\nRebuilding: see "Rebuilding with a modified Bun runtime" in CONTRIBUTING.md, https://github.com/rigomart/wt-dash/blob/main/CONTRIBUTING.md\n`,
 ];
 const runtimeLicenses = join(root, "licenses", `bun-${runtimeVersion}`);
 notices.push(await readFile(join(runtimeLicenses, "NOTICES.txt"), "utf8"));
