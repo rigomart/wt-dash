@@ -79,7 +79,7 @@ Enter opens one confirmation dialog. It lists each worktree and its size, the to
 - **Branches are kept** unless they are merged. Press `D` in the dialog to delete unmerged branches too.
 - **Processes are left alone** unless you press `e`, which asks Worktrunk to stop processes running inside.
 - **Ignored files go with the worktree.** That includes `.env` copies, local databases, and caches, the same way Worktrunk treats them.
-- **Every removal is checked again** just before it runs. A worktree that changed since you confirmed is skipped and comes back with a note.
+- **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, or a rebase or merge is in progress, it is skipped and comes back with a note. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
 - **Worktrunk hooks are skipped.** Project-defined cleanup commands do not run.
 
 Removals run in the background, and you can queue more while one is going. Each attempt is logged to `~/.cache/wt-dash/removals.log`.
