@@ -4,11 +4,14 @@ import { resolve, join } from "node:path";
 import metadata from "../package.json";
 
 const repository = process.argv[2] ?? process.env.GITHUB_REPOSITORY;
-if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("Supply the GitHub repository: bun run formula owner/wt-dash");
+if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository))
+  throw new Error("Supply the GitHub repository: bun run formula owner/wt-dash");
 const directory = resolve(import.meta.dir, "../dist");
 const hashes: Record<string, string> = {};
 for (const arch of ["arm64", "x64"]) {
-  const archive = await readFile(join(directory, `wt-dash-v${metadata.version}-darwin-${arch}.tar.gz`));
+  const archive = await readFile(
+    join(directory, `wt-dash-v${metadata.version}-darwin-${arch}.tar.gz`),
+  );
   hashes[arch] = createHash("sha256").update(archive).digest("hex");
 }
 const base = `https://github.com/${repository}`;

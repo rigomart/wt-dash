@@ -2,11 +2,18 @@ import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 
 async function run(args: string[]) {
-  const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/index.ts"), ...args], {
-    env: { ...process.env, PATH: "" }, stdout: "pipe", stderr: "pipe",
-  });
+  const child = Bun.spawn(
+    [process.execPath, resolve(import.meta.dir, "../src/index.ts"), ...args],
+    {
+      env: { ...process.env, PATH: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
   ]);
   return { stdout, stderr, code };
 }

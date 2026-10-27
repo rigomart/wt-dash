@@ -7,12 +7,19 @@ const root = resolve(import.meta.dir, "..");
 const output = join(root, "dist");
 const runtimeVersion = "1.3.14";
 if (Bun.version !== runtimeVersion) {
-  throw new Error(`Release builds use Bun ${runtimeVersion} so the bundled runtime and license notices match. Run: bunx bun@${runtimeVersion} run build`);
+  throw new Error(
+    `Release builds use Bun ${runtimeVersion} so the bundled runtime and license notices match. Run: bunx bun@${runtimeVersion} run build`,
+  );
 }
 if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) {
-  throw new Error("Build on an Apple Silicon or Intel Mac. Each release architecture is built on its own Mac.");
+  throw new Error(
+    "Build on an Apple Silicon or Intel Mac. Each release architecture is built on its own Mac.",
+  );
 }
-if (process.env.GITHUB_REF_TYPE === "tag" && process.env.GITHUB_REF_NAME !== `v${metadata.version}`) {
+if (
+  process.env.GITHUB_REF_TYPE === "tag" &&
+  process.env.GITHUB_REF_NAME !== `v${metadata.version}`
+) {
   throw new Error("The release tag must match the version in package.json.");
 }
 await mkdir(output, { recursive: true });
@@ -21,8 +28,10 @@ const result = await Bun.build({
   compile: {
     target: process.arch === "arm64" ? "bun-darwin-arm64" : "bun-darwin-x64",
     outfile: join(output, "wt-dash"),
-    autoloadDotenv: false, autoloadBunfig: false,
-    autoloadTsconfig: false, autoloadPackageJson: false,
+    autoloadDotenv: false,
+    autoloadBunfig: false,
+    autoloadTsconfig: false,
+    autoloadPackageJson: false,
   },
 });
 if (!result.success) throw new AggregateError(result.logs, "Compilation failed");
@@ -39,24 +48,46 @@ async function collect(name: string, optional = false): Promise<void> {
   visited.add(name);
   const directory = join(root, "node_modules", name);
   let pkg;
-  try { pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8")); }
-  catch (error) { if (optional && (error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-  const licenseFiles = (await readdir(directory)).filter((file) => /^(license|copying|notice)([.-]|$)/i.test(file)).sort();
+  try {
+    pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
+  } catch (error) {
+    if (optional && (error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const licenseFiles = (await readdir(directory))
+    .filter((file) => /^(license|copying|notice)([.-]|$)/i.test(file))
+    .sort();
   notices.push(`\n${pkg.name} ${pkg.version} (${pkg.license ?? "see license below"})\n`);
-  for (const file of licenseFiles) notices.push(`${file}\n${await readFile(join(directory, file), "utf8")}`);
+  for (const file of licenseFiles)
+    notices.push(`${file}\n${await readFile(join(directory, file), "utf8")}`);
   if (!licenseFiles.length) throw new Error(`No license file found for ${name}`);
   for (const dependency of Object.keys(pkg.dependencies ?? {})) await collect(dependency);
   for (const dependency of Object.keys(pkg.peerDependencies ?? {})) await collect(dependency, true);
-  for (const dependency of Object.keys(pkg.optionalDependencies ?? {})) await collect(dependency, true);
+  for (const dependency of Object.keys(pkg.optionalDependencies ?? {}))
+    await collect(dependency, true);
 }
 for (const dependency of Object.keys(metadata.dependencies)) await collect(dependency);
 await writeFile(join(output, "THIRD_PARTY_NOTICES.txt"), notices.join("\n"));
 for (const file of ["LICENSE", "README.md"]) await copyFile(join(root, file), join(output, file));
 
 const archive = `wt-dash-v${metadata.version}-darwin-${process.arch}.tar.gz`;
-const tar = Bun.spawn(["/usr/bin/tar", "-czf", join(output, archive), "-C", output,
-  "wt-dash", "LICENSE", "README.md", "THIRD_PARTY_NOTICES.txt"], { stdout: "inherit", stderr: "inherit" });
-if (await tar.exited !== 0) throw new Error("Could not create the release archive");
-const hash = createHash("sha256").update(await readFile(join(output, archive))).digest("hex");
+const tar = Bun.spawn(
+  [
+    "/usr/bin/tar",
+    "-czf",
+    join(output, archive),
+    "-C",
+    output,
+    "wt-dash",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_NOTICES.txt",
+  ],
+  { stdout: "inherit", stderr: "inherit" },
+);
+if ((await tar.exited) !== 0) throw new Error("Could not create the release archive");
+const hash = createHash("sha256")
+  .update(await readFile(join(output, archive)))
+  .digest("hex");
 await writeFile(join(output, `${archive}.sha256`), `${hash}  ${archive}\n`);
 console.log(`Built ${join(output, archive)}\nSHA-256: ${hash}`);

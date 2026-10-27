@@ -7,7 +7,11 @@ export async function runCommand(
   environment?: Record<string, string>,
 ): Promise<CommandResult> {
   if (signal?.aborted) throw new Error("Command aborted");
-  const child = Bun.spawn([command, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...environment } });
+  const child = Bun.spawn([command, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, ...environment },
+  });
   const onAbort = () => child.kill();
   signal?.addEventListener("abort", onAbort, { once: true });
   try {

@@ -2,7 +2,7 @@ import { assess } from "../core/assess";
 import type { WorktreeRow } from "../core/types";
 
 export function plain(value: string): string {
-  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+  return value.replace(/\p{Cc}/gu, " ");
 }
 
 export function sizeLabel(kib: number | null): string {
@@ -51,14 +51,20 @@ export function branchLabel(row: WorktreeRow): string {
 }
 
 export function homePath(path: string, home: string): string {
-  return home && (path === home || path.startsWith(home + "/")) ? "~" + path.slice(home.length) : path;
+  return home && (path === home || path.startsWith(home + "/"))
+    ? "~" + path.slice(home.length)
+    : path;
 }
 
 /** Display the single Git status, shortened only when the column cannot fit it. */
 export function statusLabel(row: WorktreeRow, width = 23): string {
   const label = plain(assess(row).status);
   if (Bun.stringWidth(label) <= width) return label;
-  return width > 0 ? Array.from(label).slice(0, Math.max(0, width - 1)).join("") + "…" : "";
+  return width > 0
+    ? Array.from(label)
+        .slice(0, Math.max(0, width - 1))
+        .join("") + "…"
+    : "";
 }
 
 export function changesLabel(row: WorktreeRow): string {
@@ -80,10 +86,14 @@ export function upstreamLabel(row: WorktreeRow): string {
 
 export function branchOutcomeLabel(outcome: string): string {
   switch (outcome) {
-    case "deleted": return "branch deleted";
-    case "retained_unmerged": return "branch kept (not merged)";
-    case "not_attempted": return "branch left alone";
-    default: return `branch ${outcome.replaceAll("_", " ")}`;
+    case "deleted":
+      return "branch deleted";
+    case "retained_unmerged":
+      return "branch kept (not merged)";
+    case "not_attempted":
+      return "branch left alone";
+    default:
+      return `branch ${outcome.replaceAll("_", " ")}`;
   }
 }
 

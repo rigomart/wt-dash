@@ -35,7 +35,10 @@ test("limits concurrent du calls to two", async () => {
 
 test("loads a timestamped size and persists a new measurement for a path with spaces", async () => {
   const path = await cachePath();
-  await writeFile(path, JSON.stringify({ "/old": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }));
+  await writeFile(
+    path,
+    JSON.stringify({ "/old": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }),
+  );
   const calls: string[][] = [];
   const runner: CommandRunner = async (_command, args) => {
     calls.push(args);
@@ -65,7 +68,10 @@ test("missing or corrupt cache loads empty and failed du leaves size unknown", a
 
 test("malformed du output does not replace an existing cached size", async () => {
   const path = await cachePath();
-  await writeFile(path, JSON.stringify({ "/old": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }));
+  await writeFile(
+    path,
+    JSON.stringify({ "/old": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }),
+  );
   const sizes = createSizeService(path, async () => ({ stdout: "nope", stderr: "", exitCode: 0 }));
   await sizes.load();
   expect(await sizes.measure("/old")).toBeNull();
@@ -75,19 +81,26 @@ test("malformed du output does not replace an existing cached size", async () =>
 
 test("closing cancels a slow measurement and releases queued work", async () => {
   let aborted = 0;
-  const runner: CommandRunner = async (_command, _args, signal) => new Promise((resolve) => {
-    signal?.addEventListener("abort", () => {
-      aborted++;
-      resolve({ stdout: "", stderr: "aborted", exitCode: 1 });
-    }, { once: true });
-  });
+  const runner: CommandRunner = async (_command, _args, signal) =>
+    new Promise((resolve) => {
+      signal?.addEventListener(
+        "abort",
+        () => {
+          aborted++;
+          resolve({ stdout: "", stderr: "aborted", exitCode: 1 });
+        },
+        { once: true },
+      );
+    });
   const sizes = createSizeService(await cachePath(), runner, 1);
   const first = sizes.measure("/slow");
   const queued = sizes.measure("/queued");
   await Bun.sleep(0);
   await Promise.race([
     sizes.close(),
-    Bun.sleep(100).then(() => { throw new Error("close waited for du"); }),
+    Bun.sleep(100).then(() => {
+      throw new Error("close waited for du");
+    }),
   ]);
   expect(await first).toBeNull();
   expect(await queued).toBeNull();
@@ -109,9 +122,10 @@ function gatedRunner() {
     running--;
     return { stdout: `20\t${args[1]}\n`, stderr: "", exitCode: 0 };
   };
-  const reached = (count: number) => started.length >= count
-    ? Promise.resolve()
-    : new Promise<void>((resolve) => watchers.push([count, resolve]));
+  const reached = (count: number) =>
+    started.length >= count
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => watchers.push([count, resolve]));
   return { runner, started, gates, reached, peak: () => peak };
 }
 
@@ -161,17 +175,27 @@ test("uncached paths get a slot before earlier-queued cached paths, FIFO within 
 
 test("closing releases waiters in both queues", async () => {
   const path = await cachePath();
-  await writeFile(path, JSON.stringify({ "/cached": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }));
-  const runner: CommandRunner = async (_command, _args, signal) => new Promise((resolve) => {
-    signal?.addEventListener("abort", () => resolve({ stdout: "", stderr: "aborted", exitCode: 1 }), { once: true });
-  });
+  await writeFile(
+    path,
+    JSON.stringify({ "/cached": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }),
+  );
+  const runner: CommandRunner = async (_command, _args, signal) =>
+    new Promise((resolve) => {
+      signal?.addEventListener(
+        "abort",
+        () => resolve({ stdout: "", stderr: "aborted", exitCode: 1 }),
+        { once: true },
+      );
+    });
   const sizes = createSizeService(path, runner, 1);
   await sizes.load();
   const results = ["/slow", "/cached", "/uncached"].map((target) => sizes.measure(target));
   await Bun.sleep(0);
   await Promise.race([
     sizes.close(),
-    Bun.sleep(100).then(() => { throw new Error("close left a waiter hanging"); }),
+    Bun.sleep(100).then(() => {
+      throw new Error("close left a waiter hanging");
+    }),
   ]);
   expect(await Promise.all(results)).toEqual([null, null, null]);
 });

@@ -2,7 +2,13 @@ import { assess } from "./assess";
 import { readComparisonBase } from "./base";
 import { discoverRepos } from "./discovery";
 import { parseWorktrunk, SchemaMismatchError } from "./worktrunk";
-import type { CommandRunner, DashboardService, DashboardSnapshot, SizeService, WorktreeRow } from "./types";
+import type {
+  CommandRunner,
+  DashboardService,
+  DashboardSnapshot,
+  SizeService,
+  WorktreeRow,
+} from "./types";
 
 interface DashboardOptions {
   projectRoot: string;
@@ -43,16 +49,23 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
 
   function scheduleSizes(rows: WorktreeRow[], scanGeneration: number): void {
     for (const row of rows) {
-      void options.sizeService.measure(row.path).then((entry) => {
-        if (!entry || !current(scanGeneration)) return;
-        const index = snapshot.rows.findIndex((candidate) => candidate.id === row.id);
-        if (index < 0) return;
-        const updated = [...snapshot.rows];
-        updated[index] = { ...updated[index]!, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt };
-        publish({ ...snapshot, rows: updated });
-      }).catch(() => {
-        // A failed size check leaves the row's current estimate in place.
-      });
+      void options.sizeService
+        .measure(row.path)
+        .then((entry) => {
+          if (!entry || !current(scanGeneration)) return;
+          const index = snapshot.rows.findIndex((candidate) => candidate.id === row.id);
+          if (index < 0) return;
+          const updated = [...snapshot.rows];
+          updated[index] = {
+            ...updated[index]!,
+            sizeKiB: entry.sizeKiB,
+            sizeMeasuredAt: entry.measuredAt,
+          };
+          publish({ ...snapshot, rows: updated });
+        })
+        .catch(() => {
+          // A failed size check leaves the row's current estimate in place.
+        });
     }
   }
 
@@ -68,7 +81,8 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     async refresh(only) {
       if (closed) return;
       // A targeted rescan would cancel a full scan that is still filling in rows; widen it instead.
-      const targeted = only?.length && snapshot.progress.phase !== "scanning" ? new Set(only) : null;
+      const targeted =
+        only?.length && snapshot.progress.phase !== "scanning" ? new Set(only) : null;
       const scanGeneration = ++generation;
       for (const controller of controllers) controller.abort();
       controllers.clear();
@@ -85,20 +99,28 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
           completedAt: null,
         },
         errors: targeted
-          ? Object.fromEntries(Object.entries(snapshot.errors).filter(([repo]) => !targeted.has(repo)))
+          ? Object.fromEntries(
+              Object.entries(snapshot.errors).filter(([repo]) => !targeted.has(repo)),
+            )
           : {},
         fatalError: null,
       });
       const scanned = new Set<string>();
       let repos: string[];
       try {
-        repos = targeted ? [...targeted] : await (options.discover ?? discoverRepos)(options.projectRoot, 3);
+        repos = targeted
+          ? [...targeted]
+          : await (options.discover ?? discoverRepos)(options.projectRoot, 3);
       } catch (error) {
         if (current(scanGeneration)) {
           publish({
             ...snapshot,
             fatalError: `Repository discovery failed: ${String(error)}`,
-            progress: { ...snapshot.progress, phase: "error", completedAt: new Date().toISOString() },
+            progress: {
+              ...snapshot.progress,
+              phase: "error",
+              completedAt: new Date().toISOString(),
+            },
           });
         }
         return;
@@ -123,15 +145,23 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
               publish({
                 ...snapshot,
                 rows: snapshot.rows.filter((row) => row.repoPath !== repo),
-                errors: { ...snapshot.errors, [repo]: result.stderr.trim() || `wt exited ${result.exitCode}` },
+                errors: {
+                  ...snapshot.errors,
+                  [repo]: result.stderr.trim() || `wt exited ${result.exitCode}`,
+                },
               });
             } else {
               let rows: WorktreeRow[];
               try {
                 rows = withSizes(parseWorktrunk(repo, result.stdout));
                 if (rows.length) {
-                  const base = await readComparisonBase(repo, rows[0]!.defaultBranch, options.runner, controller.signal);
-                  rows = rows.map(row => {
+                  const base = await readComparisonBase(
+                    repo,
+                    rows[0]!.defaultBranch,
+                    options.runner,
+                    controller.signal,
+                  );
+                  rows = rows.map((row) => {
                     const enriched = { ...row, mainBase: base };
                     const assessment = assess(enriched);
                     return { ...enriched, verdict: assessment.verdict, reason: assessment.reason };
@@ -142,16 +172,24 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
                 publish({
                   ...snapshot,
                   rows: [],
-                  fatalError: error instanceof SchemaMismatchError
-                    ? error.message
-                    : `Invalid Worktrunk JSON from ${repo}: ${String(error)}`,
-                  progress: { ...snapshot.progress, phase: "error", completedAt: new Date().toISOString() },
+                  fatalError:
+                    error instanceof SchemaMismatchError
+                      ? error.message
+                      : `Invalid Worktrunk JSON from ${repo}: ${String(error)}`,
+                  progress: {
+                    ...snapshot.progress,
+                    phase: "error",
+                    completedAt: new Date().toISOString(),
+                  },
                 });
                 for (const other of controllers) other.abort();
                 continue;
               }
               if (!current(scanGeneration)) continue;
-              publish({ ...snapshot, rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows] });
+              publish({
+                ...snapshot,
+                rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows],
+              });
               scheduleSizes(rows, scanGeneration);
             }
           } catch (error) {
@@ -179,7 +217,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
           ...snapshot,
           // After a full scan, rows from repos that were not listed again (for example, deleted repos) are stale.
           rows: targeted ? snapshot.rows : snapshot.rows.filter((row) => scanned.has(row.repoPath)),
-          progress: { ...snapshot.progress, phase: "complete", completedAt: new Date().toISOString() },
+          progress: {
+            ...snapshot.progress,
+            phase: "complete",
+            completedAt: new Date().toISOString(),
+          },
         });
       }
     },
@@ -191,9 +233,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       if (!entry || !current(scanGeneration)) return;
       publish({
         ...snapshot,
-        rows: snapshot.rows.map((candidate) => candidate.id === worktreeId
-          ? { ...candidate, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt }
-          : candidate),
+        rows: snapshot.rows.map((candidate) =>
+          candidate.id === worktreeId
+            ? { ...candidate, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt }
+            : candidate,
+        ),
       });
     },
     async close() {

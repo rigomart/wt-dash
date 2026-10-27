@@ -30,9 +30,13 @@ export function createTheme(mode: "dark" | "light" | null): Theme {
 
 export function verdictColor(theme: Theme, verdict: Verdict): RGBA {
   switch (verdict) {
-    case "Safe": return theme.safe;
-    case "Review": return theme.review;
-    case "Busy": return theme.busy;
-    case "Broken": return theme.broken;
+    case "Safe":
+      return theme.safe;
+    case "Review":
+      return theme.review;
+    case "Busy":
+      return theme.busy;
+    case "Broken":
+      return theme.broken;
   }
 }

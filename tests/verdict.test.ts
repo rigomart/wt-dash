@@ -3,7 +3,12 @@ import { verdictFor } from "../src/core/verdict";
 import type { ChangeFlags, WorktreeFacts } from "../src/core/types";
 
 const cleanChanges: ChangeFlags = {
-  staged: false, modified: false, untracked: false, renamed: false, deleted: false, conflicted: false,
+  staged: false,
+  modified: false,
+  untracked: false,
+  renamed: false,
+  deleted: false,
+  conflicted: false,
 };
 const clean: WorktreeFacts = {
   id: "repo\0path",
@@ -17,7 +22,10 @@ const clean: WorktreeFacts = {
   changes: cleanChanges,
   upstreamAhead: 0,
   mainState: "integrated",
-  lockReason: null, mainAhead: null, defaultBranch: "main", mainBase: "main",
+  lockReason: null,
+  mainAhead: null,
+  defaultBranch: "main",
+  mainBase: "main",
   locked: false,
   prunable: false,
   operation: null,
