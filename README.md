@@ -86,7 +86,7 @@ Removals run in the background, and you can queue more while one is going. Each 
 
 ## Good to know
 
-- Sizes come from `du` and are cached in `~/.cache/wt-dash/sizes.json`. Totals read "up to" because disk blocks shared between files can make `du` overstate the space you get back.
+- Sizes come from `du` and are cached in `~/.cache/wt-dash/sizes.json`. A worktree is measured again only when its saved size is more than a day old, or when files were added or removed at the top level of the worktree or its `node_modules` folder. Press `R` to remeasure the focused worktree now. Totals read "up to" because disk blocks shared between files can make `du` overstate the space you get back.
 - wt-dash runs Git and Worktrunk locally. It makes no network requests of its own and never changes your Worktrunk settings.
 
 ## Contributing

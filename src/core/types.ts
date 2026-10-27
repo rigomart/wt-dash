@@ -52,15 +52,25 @@ export type CommandRunner = (
   environment?: Record<string, string>,
 ) => Promise<CommandResult>;
 
+/** Folder mtimes taken just before `du` ran. */
+export interface SizeSignature {
+  mtimeMs: number;
+  nodeModulesMtimeMs: number | null;
+}
+
 export interface SizeEntry {
   sizeKiB: number;
   measuredAt: string;
+  /** Missing on entries saved before signatures existed; those count as stale. */
+  signature?: SizeSignature;
 }
 
 export interface SizeService {
   load(): Promise<void>;
   get(path: string): SizeEntry | null;
   measure(path: string): Promise<SizeEntry | null>;
+  /** Measures only when the saved size is stale, joining a stale check already running for the path; resolves to null when it is still fresh or the measurement fails. */
+  measureIfStale(path: string): Promise<SizeEntry | null>;
   close(): Promise<void>;
 }
 

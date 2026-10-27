@@ -5,6 +5,7 @@ import type {
   CommandRunner,
   DashboardService,
   DashboardSnapshot,
+  SizeEntry,
   SizeService,
 } from "../src/core/types";
 
@@ -13,6 +14,7 @@ const sizeService: SizeService = {
   load: async () => {},
   get: () => null,
   measure: async () => null,
+  measureIfStale: async () => null,
   close: async () => {},
 };
 
@@ -355,6 +357,110 @@ test("Git-safe rows are immediately available while other repositories are still
   } finally {
     release();
     await scanning;
+    await service.close();
+  }
+});
+
+test("a scan measures only stale sizes and publishes only for new measurements", async () => {
+  const forced: string[] = [];
+  const checked: string[] = [];
+  const settle: Array<() => void> = [];
+  const saved = new Map<string, SizeEntry>();
+  const sizes: SizeService = {
+    ...sizeService,
+    get: (path) => saved.get(path) ?? null,
+    measure: async (path) => {
+      forced.push(path);
+      return null;
+    },
+    measureIfStale: (path) => {
+      checked.push(path);
+      const entry = path.includes("a space")
+        ? { sizeKiB: 77, measuredAt: "2026-10-01T00:00:00Z" }
+        : null;
+      return new Promise((resolve) =>
+        settle.push(() => {
+          if (entry) saved.set(path, entry);
+          resolve(entry);
+        }),
+      );
+    },
+  };
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: sizes,
+    discover: async () => ["/repo"],
+    runner: async () => result(),
+  });
+  let published = 0;
+  service.subscribe(() => published++);
+  try {
+    await service.refresh();
+    expect(checked).toHaveLength(2);
+    expect(forced).toEqual([]);
+    const before = published;
+    for (const resolve of settle) resolve();
+    await Bun.sleep(0);
+    expect(published).toBe(before + 1);
+    expect(service.getSnapshot().rows.find((row) => row.branch === "feature/name")?.sizeKiB).toBe(
+      77,
+    );
+  } finally {
+    await service.close();
+  }
+});
+
+test("remeasuring a worktree always measures, even when its saved size is fresh", async () => {
+  const forced: string[] = [];
+  const sizes: SizeService = {
+    ...sizeService,
+    measure: async (path) => {
+      forced.push(path);
+      return { sizeKiB: 9, measuredAt: "2026-10-01T00:00:00Z" };
+    },
+  };
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: sizes,
+    discover: async () => ["/repo"],
+    runner: async () => result(),
+  });
+  try {
+    await service.refresh();
+    expect(forced).toEqual([]);
+    const row = service
+      .getSnapshot()
+      .rows.find((candidate) => candidate.branch === "feature/name")!;
+    await service.refreshSize(row.id);
+    expect(forced).toEqual([row.path]);
+    expect(service.getSnapshot().rows.find((candidate) => candidate.id === row.id)?.sizeKiB).toBe(
+      9,
+    );
+  } finally {
+    await service.close();
+  }
+});
+
+test("a fresh size saved while a rescan was listing still reaches the screen", async () => {
+  let saved: SizeEntry = { sizeKiB: 8, measuredAt: "2026-10-01T00:00:00Z" };
+  const sizes: SizeService = { ...sizeService, get: () => saved };
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: sizes,
+    discover: async () => ["/repo"],
+    runner: async (_command, args) => {
+      if (args.includes("rev-parse")) saved = { sizeKiB: 20, measuredAt: "2026-10-01T01:00:00Z" };
+      return result();
+    },
+  });
+  try {
+    await service.refresh();
+    await Bun.sleep(0);
+    expect(service.getSnapshot().rows.map((row) => row.sizeKiB)).toEqual([20, 20]);
+  } finally {
     await service.close();
   }
 });
