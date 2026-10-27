@@ -142,16 +142,26 @@ async function start(
   const fake = fakeService(rows, phase);
   const running = runTerminal(fake.service, { renderer: setup.renderer, actions, home: "/repos" });
   const frame = async () => {
-    // A lone Esc is only reported once the input parser rules out an escape sequence.
     await Bun.sleep(40);
     await setup.renderOnce();
     return setup.captureCharFrame();
   };
+  // OpenTUI reports a lone Esc only after a timer rules out an escape sequence, so wait for the key itself.
+  const escape = () =>
+    new Promise<void>((resolve) => {
+      const seen = (key: { name: string }) => {
+        if (key.name !== "escape") return;
+        setup.renderer.keyInput.off("keypress", seen);
+        resolve();
+      };
+      setup.renderer.keyInput.on("keypress", seen);
+      setup.mockInput.pressEscape();
+    });
   const stop = async () => {
     setup.mockInput.pressCtrlC();
     await running;
   };
-  return { setup, fake, running, frame, stop };
+  return { setup, fake, running, frame, escape, stop };
 }
 
 test("rows sit under verdict sections with their reasons, and the focused row's details sit beside them", async () => {
@@ -226,7 +236,7 @@ test("search filters as you type, matches repo names, and r rescans", async () =
     ui.setup.mockInput.pressEnter();
     ui.setup.mockInput.pressKey("r");
     expect(ui.fake.getRefreshes()).toBeGreaterThan(1);
-    ui.setup.mockInput.pressEscape();
+    await ui.escape();
     frame = await ui.frame();
     expect(frame).toContain("api");
   } finally {
@@ -406,7 +416,7 @@ test("the confirm bar names uncommitted changes it will discard, and esc cancels
     ui.setup.mockInput.pressKey(" ");
     ui.setup.mockInput.pressKey("x");
     expect(await ui.frame()).toContain("Discards uncommitted changes in api");
-    ui.setup.mockInput.pressEscape();
+    await ui.escape();
     expect(await ui.frame()).not.toContain("Discards uncommitted");
     ui.setup.mockInput.pressKey("x");
     await ui.frame();
@@ -467,7 +477,7 @@ test("? opens the key overlay and esc closes it", async () => {
   try {
     ui.setup.mockInput.pressKey("?");
     expect(await ui.frame()).toContain("group by repo");
-    ui.setup.mockInput.pressEscape();
+    await ui.escape();
     expect(await ui.frame()).not.toContain("group by repo");
   } finally {
     await ui.stop();
