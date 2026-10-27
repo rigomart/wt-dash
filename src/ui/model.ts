@@ -19,6 +19,8 @@ const SORT_KEYS: SortKey[] = ["size", "age", "repo"];
 const DESCENDING_BY_DEFAULT: Record<SortKey, boolean> = { size: true, age: true, repo: false };
 export const VERDICTS: Verdict[] = ["Safe", "Review", "Busy", "Broken"];
 
+export type Screen = { kind: "projects" } | { kind: "project"; repoPath: string } | { kind: "all" };
+
 export type Tone = "info" | "ok" | "warn" | "error";
 export interface Toast {
   text: string;
@@ -56,6 +58,10 @@ export interface Job {
 }
 
 export interface UiState {
+  screen: Screen;
+  projectFocus: string | null;
+  keyPressed: boolean;
+  scanned: boolean;
   tab: Tab;
   search: string;
   searching: boolean;
@@ -138,6 +144,10 @@ export interface Result {
 
 export function initialState(): UiState {
   return {
+    screen: { kind: "projects" },
+    projectFocus: null,
+    keyPressed: false,
+    scanned: false,
     tab: "All",
     search: "",
     searching: false,
@@ -185,6 +195,91 @@ export interface ListView {
   focus: WorktreeRow | null;
 }
 
+export interface Project {
+  repoPath: string;
+  repoName: string;
+  rows: WorktreeRow[];
+  counts: Record<Verdict, number>;
+  totalKiB: number;
+  safeKiB: number;
+  unsized: number;
+  linked: number | null;
+  pending: boolean;
+  error: string | null;
+}
+
+export interface ProjectsView {
+  projects: Project[];
+  empty: number;
+  focus: Project | null;
+}
+
+function projectPaths(snapshot: DashboardSnapshot): string[] {
+  const paths = new Set(snapshot.rows.map((row) => row.repoPath));
+  for (const repo of snapshot.repos) if (repo.linked) paths.add(repo.path);
+  for (const path of Object.keys(snapshot.errors)) paths.add(path);
+  return [...paths];
+}
+
+export function projectsView(state: UiState, snapshot: DashboardSnapshot): ProjectsView {
+  const linked = new Map(snapshot.repos.map((repo) => [repo.path, repo.linked]));
+  const listed = new Set(snapshot.rows.map((row) => row.repoPath));
+  const rows = visibleRows(state, snapshot);
+  const projects = projectPaths(snapshot)
+    .map((repoPath): Project => {
+      const own = rows.filter((row) => row.repoPath === repoPath);
+      const counts: Record<Verdict, number> = { Safe: 0, Review: 0, Busy: 0, Broken: 0 };
+      let totalKiB = 0;
+      let safeKiB = 0;
+      let unsized = 0;
+      for (const row of own) {
+        counts[row.verdict]++;
+        if (row.sizeKiB === null) unsized++;
+        totalKiB += row.sizeKiB ?? 0;
+        if (row.verdict === "Safe") safeKiB += row.sizeKiB ?? 0;
+      }
+      const error = snapshot.errors[repoPath] ?? null;
+      return {
+        repoPath,
+        repoName: own[0]?.repoName ?? repoName(repoPath),
+        rows: own,
+        counts,
+        totalKiB,
+        safeKiB,
+        unsized,
+        linked: linked.get(repoPath) ?? null,
+        pending: !listed.has(repoPath) && !error && snapshot.progress.phase === "scanning",
+        error,
+      };
+    })
+    .sort(
+      (a, b) =>
+        worktreeCount(b) - worktreeCount(a) ||
+        a.repoName.localeCompare(b.repoName) ||
+        a.repoPath.localeCompare(b.repoPath),
+    );
+  const shown = new Set(projects.map((project) => project.repoPath));
+  return {
+    projects,
+    empty: snapshot.repos.filter((repo) => !shown.has(repo.path)).length,
+    focus:
+      projects.find((project) => project.repoPath === state.projectFocus) ?? projects[0] ?? null,
+  };
+}
+
+export function worktreeCount(project: Project): number {
+  return project.pending ? (project.linked ?? 0) : project.rows.length;
+}
+
+function soleProject(snapshot: DashboardSnapshot): string | null {
+  if (snapshot.repos.length === 1) return snapshot.repos[0]!.path;
+  const settled =
+    snapshot.progress.phase === "complete" ||
+    (snapshot.repos.length > 0 && snapshot.repos.every((repo) => repo.linked !== null));
+  const paths = projectPaths(snapshot);
+  return settled && paths.length === 1 ? paths[0]! : null;
+}
+
 /** Snapshot rows minus those queued, being removed, or already removed. */
 export function visibleRows(state: UiState, snapshot: DashboardSnapshot): WorktreeRow[] {
   return snapshot.rows.filter((row) => !state.gone.has(row.id) && !leaving(state, row.id));
@@ -195,8 +290,18 @@ function leaving(state: UiState, id: string): boolean {
   return status === "waiting" || status === "removing" || status === "removed";
 }
 
+export function scopedRows(state: UiState, snapshot: DashboardSnapshot): WorktreeRow[] {
+  const rows = visibleRows(state, snapshot);
+  const screen = state.screen;
+  return screen.kind === "project" ? rows.filter((row) => row.repoPath === screen.repoPath) : rows;
+}
+
+export function isGrouped(state: UiState): boolean {
+  return state.grouped && state.screen.kind === "all";
+}
+
 export function listView(state: UiState, snapshot: DashboardSnapshot): ListView {
-  const matching = selectRows(visibleRows(state, snapshot), {
+  const matching = selectRows(scopedRows(state, snapshot), {
     search: state.search,
     sort: { key: state.sort, direction: state.descending ? "desc" : "asc" },
   });
@@ -215,7 +320,7 @@ export function listView(state: UiState, snapshot: DashboardSnapshot): ListView 
   const filtered =
     state.tab === "All" ? matching : matching.filter((row) => tabOf(row.verdict) === state.tab);
   const rank = (row: WorktreeRow) => VERDICTS.indexOf(row.verdict);
-  const sections: Section[] = state.grouped
+  const sections: Section[] = isGrouped(state)
     ? groupByRepo(filtered).map((group) => ({
         kind: "repo",
         ...group,
@@ -227,7 +332,10 @@ export function listView(state: UiState, snapshot: DashboardSnapshot): ListView 
         rows: filtered.filter((row) => row.verdict === verdict),
       })).filter((section) => section.rows.length);
   const rows = sections.flatMap((section) => section.rows);
-  const focus = (state.moved && rows.find((row) => row.id === state.focusId)) || rows[0] || null;
+  const focus =
+    state.screen.kind === "projects"
+      ? null
+      : (state.moved && rows.find((row) => row.id === state.focusId)) || rows[0] || null;
   return { rows, sections, counts, safeKiB, focus };
 }
 
@@ -273,6 +381,9 @@ export function update(state: UiState, event: UiEvent, ctx: Context): Result {
     }
     case "snapshot": {
       let next = state;
+      const phase = ctx.snapshot.progress.phase;
+      if (!state.scanned && (phase === "complete" || phase === "error"))
+        next = { ...next, scanned: true };
       if (ctx.snapshot.generation !== state.generation)
         next = { ...next, generation: ctx.snapshot.generation, files: {} };
       if (ctx.snapshot.progress.phase === "complete") {
@@ -281,6 +392,10 @@ export function update(state: UiState, event: UiEvent, ctx: Context): Result {
           next = { ...next, selected: new Set([...state.selected].filter((id) => ids.has(id))) };
         if (state.gone.size && ctx.snapshot.generation > state.goneSince)
           next = { ...next, gone: new Set() };
+      }
+      if (next.screen.kind === "projects" && !next.keyPressed) {
+        const sole = soleProject(ctx.snapshot);
+        if (sole) next = openScreen(next, { kind: "project", repoPath: sole });
       }
       return same(next);
     }
@@ -448,6 +563,7 @@ function finishJob(
 }
 
 function onKey(state: UiState, key: Key, ctx: Context): Result {
+  if (!state.keyPressed) state = { ...state, keyPressed: true };
   if (key.ctrl && key.name === "c") return quitRequest(state, ctx);
   if (state.help) {
     if (key.name === "escape" || key.char === "?") return same({ ...state, help: false });
@@ -455,7 +571,72 @@ function onKey(state: UiState, key: Key, ctx: Context): Result {
     return same(state);
   }
   if (state.confirm) return onConfirmKey(state, state.confirm, key, ctx);
+  if (state.screen.kind === "projects") return onProjectsKey(state, key, ctx);
   return onListKey(state, key, ctx);
+}
+
+function openScreen(state: UiState, screen: Screen): UiState {
+  return {
+    ...state,
+    screen,
+    projectFocus: screen.kind === "project" ? screen.repoPath : state.projectFocus,
+    focusId: null,
+    moved: false,
+    expanded: false,
+    detailTop: 0,
+  };
+}
+
+function onProjectsKey(state: UiState, key: Key, ctx: Context): Result {
+  const view = projectsView(state, ctx.snapshot);
+  const focus = view.focus;
+  const moveTo = (target: number | "first" | "last"): UiState => {
+    if (!view.projects.length) return state;
+    const index = Math.max(0, view.projects.indexOf(focus!));
+    const last = view.projects.length - 1;
+    const next =
+      target === "first"
+        ? 0
+        : target === "last"
+          ? last
+          : Math.max(0, Math.min(last, index + target));
+    return { ...state, projectFocus: view.projects[next]!.repoPath };
+  };
+  if (key.char === "q") return quitRequest(state, ctx);
+  if (key.char === "?") return same({ ...state, help: true });
+  if (isUp(key)) return same(moveTo(-1));
+  if (isDown(key)) return same(moveTo(1));
+  if (key.name === "pageup") return same(moveTo(-Math.max(1, ctx.pageSize - 1)));
+  if (key.name === "pagedown") return same(moveTo(Math.max(1, ctx.pageSize - 1)));
+  if (key.name === "home" || key.char === "g") return same(moveTo("first"));
+  if (key.name === "end" || key.char === "G") return same(moveTo("last"));
+  if (isEnter(key) || key.name === "right" || key.char === "l") {
+    if (!focus) return same(state);
+    return same(openScreen(state, { kind: "project", repoPath: focus.repoPath }));
+  }
+  if (key.char === "*") return same(openScreen(state, { kind: "all" }));
+  if (key.char === "/") return same({ ...openScreen(state, { kind: "all" }), searching: true });
+  if (key.char === "a")
+    return same(focus ? selectAllSafe(state, focus.rows, ctx, focus.repoName) : state);
+  if (key.char === "x") {
+    if (!state.selected.size)
+      return same(
+        toast(state, ctx, "Nothing selected. Press a to select a project's Safe worktrees"),
+      );
+    return startRemoval(state, null, ctx);
+  }
+  if (key.char === "r") return { state, effects: [{ type: "refresh" }] };
+  if (key.name === "escape") return same(clearStep(state, ctx));
+  return same(state);
+}
+
+function stepProject(state: UiState, ctx: Context, step: number): UiState {
+  const screen = state.screen;
+  if (screen.kind !== "project") return state;
+  const { projects } = projectsView(state, ctx.snapshot);
+  const index = projects.findIndex((project) => project.repoPath === screen.repoPath);
+  const target = projects[index + step];
+  return target ? openScreen(state, { kind: "project", repoPath: target.repoPath }) : state;
 }
 
 /** Quitting never interrupts a running `wt remove`; it waits for the current worktree. */
@@ -619,7 +800,15 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
     return same({ ...state, sort, descending: DESCENDING_BY_DEFAULT[sort] });
   }
   if (key.char === "S") return same({ ...state, descending: !state.descending });
-  if (key.char === "v") return same({ ...state, grouped: !state.grouped });
+  if (key.char === "v") {
+    if (state.screen.kind !== "all")
+      return same(
+        toast(state, ctx, "Grouping by repo works in the all-projects view", "info", 2500),
+      );
+    return same({ ...state, grouped: !state.grouped });
+  }
+  if (key.char === "[") return same(stepProject(state, ctx, -1));
+  if (key.char === "]") return same(stepProject(state, ctx, 1));
   if (key.char === "i") {
     if (!ctx.canExpand)
       return same(toast(state, ctx, "All details are already on screen", "info", 2500));
@@ -635,7 +824,7 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
   }
   if (key.name === "escape") return same(clearStep(state, ctx));
   if (key.char === " " || key.name === "space") return same(toggleSelect(state, focus, ctx));
-  if (key.char === "a") return same(selectAllSafe(state, view, ctx));
+  if (key.char === "a") return same(selectAllSafe(state, view.rows, ctx));
   if (isEnter(key) || key.char === "x") return startAction(state, focus, ctx);
   return same(state);
 }
@@ -646,7 +835,6 @@ function startAction(state: UiState, focus: WorktreeRow | null, ctx: Context): R
   return startRemoval(state, focus, ctx);
 }
 
-/** Esc undoes one thing at a time: pending check, search, expanded details, selection, tab, then a running removal. */
 function clearStep(state: UiState, ctx: Context): UiState {
   if (state.pending) return toast({ ...state, pending: null }, ctx, "Cancelled");
   if (state.search) return { ...state, search: "" };
@@ -658,6 +846,7 @@ function clearStep(state: UiState, ctx: Context): UiState {
       `Cleared ${countLabel(state.selected.size, "selection")}`,
     );
   if (state.tab !== "All") return { ...state, tab: "All" };
+  if (state.screen.kind !== "projects") return openScreen(state, { kind: "projects" });
   if (state.jobs.some((job) => !job.stopping)) {
     return toast(stopJobs(state), ctx, "Stopping after the current worktree", "warn", 60_000);
   }
@@ -681,17 +870,23 @@ function toggleSelect(state: UiState, focus: WorktreeRow | null, ctx: Context): 
   return { ...state, selected };
 }
 
-function selectAllSafe(state: UiState, view: ListView, ctx: Context): UiState {
+function selectAllSafe(
+  state: UiState,
+  rows: WorktreeRow[],
+  ctx: Context,
+  project?: string,
+): UiState {
   if (!ctx.canAct) return toast(state, ctx, "Removal is not available in this session");
-  const safe = view.rows.filter((row) => row.verdict === "Safe" && !selectBlock(state, row));
-  if (!safe.length) return toast(state, ctx, "No Safe worktrees in this view");
+  const where = project ? ` in ${project}` : "";
+  const safe = rows.filter((row) => row.verdict === "Safe" && !selectBlock(state, row));
+  if (!safe.length) return toast(state, ctx, `No Safe worktrees${where || " in this view"}`);
   const selected = new Set(state.selected);
   if (safe.every((row) => selected.has(row.id))) {
     for (const row of safe) selected.delete(row.id);
     return toast(
       { ...state, selected },
       ctx,
-      `Cleared ${countLabel(safe.length, "Safe worktree")}`,
+      `Cleared ${countLabel(safe.length, "Safe worktree")}${where}`,
     );
   }
   for (const row of safe) selected.add(row.id);
@@ -699,7 +894,7 @@ function selectAllSafe(state: UiState, view: ListView, ctx: Context): UiState {
   return toast(
     { ...state, selected },
     ctx,
-    `Selected ${countLabel(safe.length, "Safe worktree")} · up to ${sizeLabel(kib)}`,
+    `Selected ${countLabel(safe.length, "Safe worktree")}${where} · up to ${sizeLabel(kib)}`,
     "ok",
   );
 }

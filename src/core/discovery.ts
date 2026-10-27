@@ -38,3 +38,13 @@ export async function discoverRepos(root: string, maxDepth: number): Promise<str
   await visit(root, 0);
   return repos.sort();
 }
+
+/** Count the linked worktrees Git records in `.git/worktrees`, without running Git. */
+export async function countLinkedWorktrees(repo: string): Promise<number | null> {
+  try {
+    const entries = await readdir(join(repo, ".git", "worktrees"), { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).length;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? 0 : null;
+  }
+}

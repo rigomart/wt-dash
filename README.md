@@ -56,21 +56,38 @@ A blocked row says what to do next, for example "finish or abort the rebase firs
 
 ## Keys
 
-| Key        | Action                                             |
-| ---------- | -------------------------------------------------- |
-| ↑/↓ or j/k | Move                                               |
-| 1–5 or ←/→ | Show all, Safe, Review, Busy, or Broken            |
-| /          | Search by repo, branch, tool, or path              |
-| Space      | Select the focused worktree                        |
-| a          | Select every Safe worktree in view                 |
-| Enter or x | Remove the selection, or the focused worktree      |
-| i          | Show full details for the focused worktree         |
-| s / S      | Change the sort (size, age, repo) / reverse it     |
-| v          | Group by verdict or by repo                        |
-| r / R      | Rescan everything / remeasure the focused worktree |
-| Esc        | Step back: clear the search, selection, or tab     |
-| ?          | Show every key                                     |
-| q          | Quit                                               |
+wt-dash opens on a table of projects: each repository with linked worktrees, how many it has under each verdict, and how much space its Safe worktrees take. Projects with the most worktrees come first, and the table appears once every repository has been listed; sizes keep filling in after that. Open a project to see its worktrees. Details of the focused project or worktree stay in a panel beside the list on terminals at least 110 columns wide, and in a short strip under it on narrower ones. If the scan finds only one project, wt-dash opens it directly.
+
+On the projects screen:
+
+| Key        | Action                                              |
+| ---------- | --------------------------------------------------- |
+| ↑/↓ or j/k | Move                                                |
+| Enter      | Open the focused project                            |
+| \*         | List the worktrees of every project together        |
+| /          | Search every project by repo, branch, tool, or path |
+| a          | Select every Safe worktree in the focused project   |
+| x          | Remove the selection                                |
+| Esc        | Clear the selection, then stop a running removal    |
+
+In a worktree list:
+
+| Key        | Action                                                                      |
+| ---------- | --------------------------------------------------------------------------- |
+| ↑/↓ or j/k | Move                                                                        |
+| 1–5 or ←/→ | Show all, Safe, Review, Busy, or Broken                                     |
+| [ / ]      | Previous / next project                                                     |
+| /          | Search by repo, branch, tool, or path                                       |
+| Space      | Select the focused worktree                                                 |
+| a          | Select every Safe worktree in view                                          |
+| Enter or x | Remove the selection, or the focused worktree                               |
+| i          | Show full details for the focused worktree                                  |
+| s / S      | Change the sort (size, age, repo) / reverse it                              |
+| v          | Group by verdict or by repo (all-projects list)                             |
+| R          | Remeasure the focused worktree                                              |
+| Esc        | Step back: clear the search, selection, or tab, then return to the projects |
+
+Everywhere, `r` rescans every repository, `?` shows every key, and `q` quits. Selections carry across screens.
 
 ## Removing worktrees
 

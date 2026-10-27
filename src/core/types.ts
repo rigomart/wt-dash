@@ -74,8 +74,16 @@ export interface SizeService {
   close(): Promise<void>;
 }
 
+/** A discovered repository, known before Worktrunk lists it. */
+export interface RepoInfo {
+  path: string;
+  /** Linked worktrees Git records for the repo, or null when its records could not be read. */
+  linked: number | null;
+}
+
 export interface DashboardSnapshot {
   generation: number;
+  repos: RepoInfo[];
   rows: WorktreeRow[];
   progress: {
     phase: "idle" | "scanning" | "complete" | "error";
