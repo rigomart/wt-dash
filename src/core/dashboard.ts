@@ -50,17 +50,16 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
   function scheduleSizes(rows: WorktreeRow[], scanGeneration: number): void {
     for (const row of rows) {
       void options.sizeService
-        .measure(row.path)
-        .then((entry) => {
+        .measureIfStale(row.path)
+        .then(() => {
+          const entry = options.sizeService.get(row.path);
           if (!entry || !current(scanGeneration)) return;
           const index = snapshot.rows.findIndex((candidate) => candidate.id === row.id);
           if (index < 0) return;
+          const shown = snapshot.rows[index]!;
+          if (shown.sizeKiB === entry.sizeKiB && shown.sizeMeasuredAt === entry.measuredAt) return;
           const updated = [...snapshot.rows];
-          updated[index] = {
-            ...updated[index]!,
-            sizeKiB: entry.sizeKiB,
-            sizeMeasuredAt: entry.measuredAt,
-          };
+          updated[index] = { ...shown, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt };
           publish({ ...snapshot, rows: updated });
         })
         .catch(() => {

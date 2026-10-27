@@ -1,16 +1,50 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import type { CommandRunner, SizeEntry, SizeService } from "./types";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import type { CommandRunner, SizeEntry, SizeService, SizeSignature } from "./types";
+
+/** A saved size older than this is measured again even when its folders look unchanged. */
+export const SIZE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+async function readSignature(path: string): Promise<SizeSignature | null> {
+  try {
+    const [folder, nodeModulesMtimeMs] = await Promise.all([
+      stat(path),
+      stat(join(path, "node_modules")).then(
+        (info) => info.mtimeMs,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        },
+      ),
+    ]);
+    return { mtimeMs: folder.mtimeMs, nodeModulesMtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+function parseSignature(raw: unknown): SizeSignature | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { mtimeMs, nodeModulesMtimeMs } = raw as Record<string, unknown>;
+  if (
+    !Number.isFinite(mtimeMs) ||
+    (nodeModulesMtimeMs !== null && !Number.isFinite(nodeModulesMtimeMs))
+  )
+    return undefined;
+  return { mtimeMs: mtimeMs as number, nodeModulesMtimeMs: nodeModulesMtimeMs as number | null };
+}
 
 export function createSizeService(
   cachePath: string,
   runner: CommandRunner,
   concurrency = 6,
+  now: () => number = Date.now,
 ): SizeService {
   const cache = new Map<string, SizeEntry>();
   const uncachedWaiters: Array<() => void> = [];
   const cachedWaiters: Array<() => void> = [];
   const tasks = new Set<Promise<SizeEntry | null>>();
+  const inFlight = new Map<string, Promise<SizeEntry | null>>();
   const abort = new AbortController();
   let active = 0;
   let closed = false;
@@ -53,6 +87,48 @@ export function createSizeService(
     return writes;
   }
 
+  async function isFresh(path: string): Promise<boolean> {
+    const entry = cache.get(path);
+    if (!entry?.signature) return false;
+    const age = now() - Date.parse(entry.measuredAt);
+    if (!(age >= 0 && age < SIZE_MAX_AGE_MS)) return false;
+    const current = await readSignature(path);
+    return (
+      current?.mtimeMs === entry.signature.mtimeMs &&
+      current.nodeModulesMtimeMs === entry.signature.nodeModulesMtimeMs
+    );
+  }
+
+  async function run(path: string): Promise<SizeEntry | null> {
+    if (!(await acquire(cache.has(path)))) return null;
+    try {
+      // Stat before du, so a change made while du runs is caught next time.
+      const signature = await readSignature(path);
+      if (closed) return null;
+      const result = await runner("/usr/bin/du", ["-sk", path], abort.signal);
+      if (result.exitCode !== 0) return null;
+      const match = /^(\d+)\s/.exec(result.stdout);
+      if (!match) return null;
+      const sizeKiB = Number(match[1]);
+      if (!Number.isSafeInteger(sizeKiB)) return null;
+      const entry: SizeEntry = { sizeKiB, measuredAt: new Date(now()).toISOString() };
+      if (signature) entry.signature = signature;
+      cache.set(path, entry);
+      await persist();
+      return entry;
+    } catch {
+      return null;
+    } finally {
+      release();
+    }
+  }
+
+  function track(task: Promise<SizeEntry | null>): Promise<SizeEntry | null> {
+    tasks.add(task);
+    void task.finally(() => tasks.delete(task));
+    return task;
+  }
+
   return {
     async load() {
       cache.clear();
@@ -67,7 +143,13 @@ export function createSizeService(
             (entry.sizeKiB as number) >= 0 &&
             typeof entry.measuredAt === "string"
           ) {
-            cache.set(path, { sizeKiB: entry.sizeKiB as number, measuredAt: entry.measuredAt });
+            const loaded: SizeEntry = {
+              sizeKiB: entry.sizeKiB as number,
+              measuredAt: entry.measuredAt,
+            };
+            const signature = parseSignature(entry.signature);
+            if (signature) loaded.signature = signature;
+            cache.set(path, loaded);
           }
         }
       } catch {
@@ -79,28 +161,15 @@ export function createSizeService(
     },
     measure(path) {
       if (closed) return Promise.resolve(null);
-      const hadEntry = cache.has(path);
-      const task = (async (): Promise<SizeEntry | null> => {
-        if (!(await acquire(hadEntry))) return null;
-        try {
-          const result = await runner("/usr/bin/du", ["-sk", path], abort.signal);
-          if (result.exitCode !== 0) return null;
-          const match = /^(\d+)\s/.exec(result.stdout);
-          if (!match) return null;
-          const sizeKiB = Number(match[1]);
-          if (!Number.isSafeInteger(sizeKiB)) return null;
-          const entry = { sizeKiB, measuredAt: new Date().toISOString() };
-          cache.set(path, entry);
-          await persist();
-          return entry;
-        } catch {
-          return null;
-        } finally {
-          release();
-        }
-      })();
-      tasks.add(task);
-      void task.finally(() => tasks.delete(task));
+      return track(run(path));
+    },
+    measureIfStale(path) {
+      if (closed) return Promise.resolve(null);
+      const pending = inFlight.get(path);
+      if (pending) return pending;
+      const task = track(isFresh(path).then((fresh) => (fresh ? null : run(path))));
+      inFlight.set(path, task);
+      void task.finally(() => inFlight.delete(path));
       return task;
     },
     async close() {
