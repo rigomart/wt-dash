@@ -5,10 +5,11 @@ import type { CommandRunner, SizeEntry, SizeService } from "./types";
 export function createSizeService(
   cachePath: string,
   runner: CommandRunner,
-  concurrency = 2,
+  concurrency = 6,
 ): SizeService {
   const cache = new Map<string, SizeEntry>();
-  const waiters: Array<() => void> = [];
+  const uncachedWaiters: Array<() => void> = [];
+  const cachedWaiters: Array<() => void> = [];
   const tasks = new Set<Promise<SizeEntry | null>>();
   const abort = new AbortController();
   let active = 0;
@@ -16,13 +17,13 @@ export function createSizeService(
   let writeNumber = 0;
   let writes: Promise<void> = Promise.resolve();
 
-  async function acquire(): Promise<boolean> {
+  async function acquire(hadEntry: boolean): Promise<boolean> {
     if (closed) return false;
     if (active < concurrency) {
       active++;
       return true;
     }
-    await new Promise<void>((resolve) => waiters.push(resolve));
+    await new Promise<void>((resolve) => (hadEntry ? cachedWaiters : uncachedWaiters).push(resolve));
     return !closed;
   }
 
@@ -31,7 +32,7 @@ export function createSizeService(
       active--;
       return;
     }
-    const next = waiters.shift();
+    const next = uncachedWaiters.shift() ?? cachedWaiters.shift();
     if (next) next();
     else active--;
   }
@@ -70,8 +71,9 @@ export function createSizeService(
     },
     measure(path) {
       if (closed) return Promise.resolve(null);
+      const hadEntry = cache.has(path);
       const task = (async (): Promise<SizeEntry | null> => {
-        if (!await acquire()) return null;
+        if (!await acquire(hadEntry)) return null;
         try {
           const result = await runner("/usr/bin/du", ["-sk", path], abort.signal);
           if (result.exitCode !== 0) return null;
@@ -96,7 +98,7 @@ export function createSizeService(
     async close() {
       closed = true;
       abort.abort();
-      for (const resume of waiters.splice(0)) resume();
+      for (const resume of [...uncachedWaiters.splice(0), ...cachedWaiters.splice(0)]) resume();
       await Promise.allSettled([...tasks]);
       await writes;
     },

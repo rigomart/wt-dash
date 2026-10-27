@@ -92,14 +92,20 @@ export function createActionService(options: {
     if (status.exitCode !== 0) throw new Error(`Could not inspect local files: ${status.stderr.trim() || "git status failed"}`);
     return statusFiles(status.stdout);
   }
-  async function checkRow(row: WorktreeRow): Promise<RemovalEntry> {
-    const listing = await options.runner(options.wtPath, ["-C", row.repoPath, "--config-set", "list.json-schema=2", "list", "--format=json"]);
+  async function listRepo(repoPath: string, paths: string[]): Promise<WorktreeRow[]> {
+    const listing = await options.runner(options.wtPath, ["-C", repoPath, "--config-set", "list.json-schema=2", "list", "--format=json"]);
     if (listing.exitCode !== 0) throw failure("wt list", listing);
-    let fresh = parseWorktrunk(row.repoPath, listing.stdout).find((item) => item.path === row.path);
-    if (fresh) {
-      const base = await readComparisonBase(row.repoPath, fresh.defaultBranch, options.runner);
-      fresh = { ...fresh, mainBase: base };
-    }
+    const rows = parseWorktrunk(repoPath, listing.stdout);
+    const found = rows.find((item) => paths.includes(item.path));
+    if (!found) return rows;
+    const base = await readComparisonBase(repoPath, found.defaultBranch, options.runner);
+    return rows.map((item) => ({ ...item, mainBase: base }));
+  }
+  async function checkRow(row: WorktreeRow): Promise<RemovalEntry> {
+    return checkAgainst(row, await listRepo(row.repoPath, [row.path]));
+  }
+  async function checkAgainst(row: WorktreeRow, listing: WorktreeRow[]): Promise<RemovalEntry> {
+    const fresh = listing.find((item) => item.path === row.path);
     const blockedReason = !fresh ? "it is missing or is the main worktree"
       : stamp(fresh) !== stamp(row) ? "it changed; refresh and preview again" : null;
     const entry: RemovalEntry = { row: fresh ?? row, blockedReason, localFiles: [], ignoredFiles: [],
@@ -213,14 +219,25 @@ export function createActionService(options: {
     async prepareRemoval(rows) {
       if (pruning) throw new Error("Cleanup is running");
       if (!rows.length) throw new Error("Select at least one worktree");
-      const entries: RemovalEntry[] = [];
-      for (const row of rows) {
-        try { entries.push(await checkRow(row)); }
-        catch (error) {
-          entries.push({ row, blockedReason: String(error), localFiles: [], ignoredFiles: [],
-            disposableIgnored: 0, requiresDiscard: false, branchWillBeRetained: false });
+      const entries = new Array<RemovalEntry>(rows.length);
+      const repos = [...new Set(rows.map((row) => row.repoPath))];
+      let nextRepo = 0;
+      async function worker(): Promise<void> {
+        while (nextRepo < repos.length) {
+          const repo = repos[nextRepo++]!;
+          const indexes = rows.flatMap((row, index) => row.repoPath === repo ? [index] : []);
+          const listing = listRepo(repo, indexes.map((index) => rows[index]!.path));
+          for (const index of indexes) {
+            const row = rows[index]!;
+            try { entries[index] = await checkAgainst(row, await listing); }
+            catch (error) {
+              entries[index] = { row, blockedReason: String(error), localFiles: [], ignoredFiles: [],
+                disposableIgnored: 0, requiresDiscard: false, branchWillBeRetained: false };
+            }
+          }
         }
       }
+      await Promise.all(Array.from({ length: Math.min(4, repos.length) }, () => worker()));
       removalPlan = { entries };
       return removalPlan;
     },
