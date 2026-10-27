@@ -93,3 +93,85 @@ test("closing cancels a slow measurement and releases queued work", async () => 
   expect(await queued).toBeNull();
   expect(aborted).toBe(1);
 });
+
+function gatedRunner() {
+  const started: string[] = [];
+  const gates = new Map<string, () => void>();
+  let running = 0;
+  const watchers: Array<[number, () => void]> = [];
+  let peak = 0;
+  const runner: CommandRunner = async (_command, args) => {
+    started.push(args[1]!);
+    for (const [count, wake] of watchers) if (started.length >= count) wake();
+    running++;
+    peak = Math.max(peak, running);
+    await new Promise<void>((resolve) => gates.set(args[1]!, resolve));
+    running--;
+    return { stdout: `20\t${args[1]}\n`, stderr: "", exitCode: 0 };
+  };
+  const reached = (count: number) => started.length >= count
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => watchers.push([count, resolve]));
+  return { runner, started, gates, reached, peak: () => peak };
+}
+
+test("defaults to six concurrent du calls", async () => {
+  const fake = gatedRunner();
+  const sizes = createSizeService(await cachePath(), fake.runner);
+  await sizes.load();
+  const paths = Array.from({ length: 8 }, (_, index) => `/p${index}`);
+  const results = paths.map((path) => sizes.measure(path));
+  await fake.reached(6);
+  await Bun.sleep(0);
+  expect(fake.started).toEqual(paths.slice(0, 6));
+  fake.gates.get("/p0")!();
+  await fake.reached(7);
+  await Bun.sleep(0);
+  expect(fake.started).toEqual(paths.slice(0, 7));
+  for (const [index, path] of paths.entries()) {
+    await fake.reached(index + 1);
+    fake.gates.get(path)!();
+  }
+  await Promise.all(results);
+  expect(fake.peak()).toBe(6);
+  await sizes.close();
+});
+
+test("uncached paths get a slot before earlier-queued cached paths, FIFO within each class", async () => {
+  const path = await cachePath();
+  const entry = { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" };
+  await writeFile(path, JSON.stringify({ "/c1": entry, "/c2": entry }));
+  const fake = gatedRunner();
+  const sizes = createSizeService(path, fake.runner, 1);
+  await sizes.load();
+  const results = ["/busy", "/c1", "/u1", "/c2", "/u2"].map((target) => sizes.measure(target));
+  await fake.reached(1);
+  await Bun.sleep(0);
+  expect(fake.started).toEqual(["/busy"]);
+  const order = ["/busy", "/u1", "/u2", "/c1", "/c2"];
+  for (const [index, target] of order.entries()) {
+    await fake.reached(index + 1);
+    fake.gates.get(target)!();
+  }
+  await Promise.all(results);
+  expect(fake.started).toEqual(["/busy", "/u1", "/u2", "/c1", "/c2"]);
+  expect(fake.peak()).toBe(1);
+  await sizes.close();
+});
+
+test("closing releases waiters in both queues", async () => {
+  const path = await cachePath();
+  await writeFile(path, JSON.stringify({ "/cached": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }));
+  const runner: CommandRunner = async (_command, _args, signal) => new Promise((resolve) => {
+    signal?.addEventListener("abort", () => resolve({ stdout: "", stderr: "aborted", exitCode: 1 }), { once: true });
+  });
+  const sizes = createSizeService(path, runner, 1);
+  await sizes.load();
+  const results = ["/slow", "/cached", "/uncached"].map((target) => sizes.measure(target));
+  await Bun.sleep(0);
+  await Promise.race([
+    sizes.close(),
+    Bun.sleep(100).then(() => { throw new Error("close left a waiter hanging"); }),
+  ]);
+  expect(await Promise.all(results)).toEqual([null, null, null]);
+});

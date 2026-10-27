@@ -311,3 +311,76 @@ test("all Git locks block removal and keep the full reason without owner inferen
   expect(plan.entries[0]?.blockedReason).toContain(reason);
   expect(plan.entries[0]?.blockedReason).not.toContain("Stale");
 });
+
+const repoB = "/Users/test/projects/other";
+const payloadB = structuredClone(fixture);
+payloadB.items[0]!.worktree!.path = repoB;
+payloadB.items[1]!.worktree!.path = `${repoB}/.claude/worktrees/b`;
+payloadB.items[2]!.worktree!.path = "/Users/test/.codex/worktrees/def/other";
+const rowsB = parseWorktrunk(repoB, JSON.stringify(payloadB));
+const branchRowB = rowsB[0]!;
+const detachedRowB = rowsB[1]!;
+
+function twoRepoRunner(calls: string[][], listA: () => Promise<ReturnType<typeof commandResult>> = async () => commandResult(JSON.stringify(fixture))): CommandRunner {
+  return async (command, args) => {
+    calls.push([command, ...args]);
+    if (args.includes("list")) return args[1] === repo ? listA() : commandResult(JSON.stringify(payloadB));
+    if (args.includes("remove")) return commandResult(JSON.stringify({ kind: "worktree", path: args.at(-1), branch_outcome: "deleted" }));
+    return commandResult();
+  };
+}
+
+test("preview lists each repo and reads its comparison base once", async () => {
+  const calls: string[][] = [];
+  const actions = createActionService({ wtPath: "/wt", runner: twoRepoRunner(calls), logPath: "/unused" });
+  const plan = await actions.prepareRemoval([branchRow, detachedRow, branchRowB, detachedRowB]);
+  expect(plan.entries.map((entry) => entry.blockedReason)).toEqual([null, null, null, null]);
+  for (const target of [repo, repoB]) {
+    expect(calls.filter((call) => call.includes("list") && call[2] === target)).toHaveLength(1);
+    expect(calls.filter((call) => call.includes("rev-parse") && call[2] === target)).toHaveLength(1);
+  }
+  expect(calls.filter((call) => call.includes("status"))).toHaveLength(4);
+});
+
+test("preview keeps input order across repos listed in parallel", async () => {
+  const calls: string[][] = [];
+  const slowA = async () => { await Bun.sleep(20); return commandResult(JSON.stringify(fixture)); };
+  const actions = createActionService({ wtPath: "/wt", runner: twoRepoRunner(calls, slowA), logPath: "/unused" });
+  const input = [branchRow, branchRowB, detachedRow, detachedRowB];
+  const plan = await actions.prepareRemoval(input);
+  expect(plan.entries.map((entry) => entry.row.id)).toEqual(input.map((row) => row.id));
+  const listB = calls.findIndex((call) => call.includes("list") && call[2] === repoB);
+  const statusA = calls.findIndex((call) => call.includes("status") && call[2] === branchRow.path);
+  expect(listB).toBeLessThan(statusA);
+});
+
+test.each([
+  ["exits non-zero", async () => commandResult("", 1), "Error: wt list exited 1: command failed"],
+  ["throws", async () => { throw new Error("spawn failed"); }, "Error: spawn failed"],
+  ["returns an unknown schema", async () => commandResult(JSON.stringify({ ...fixture, schema: 3 })),
+    "SchemaMismatchError: Worktrunk JSON schema changed: expected 2, received 3"],
+] as const)("a listing that %s blocks only its own repo's rows", async (_name, listA, reason) => {
+  const calls: string[][] = [];
+  const actions = createActionService({ wtPath: "/wt", runner: twoRepoRunner(calls, listA), logPath: "/unused" });
+  const plan = await actions.prepareRemoval([branchRow, branchRowB, detachedRow, detachedRowB]);
+  const blocked = (row: typeof branchRow) => ({ row, blockedReason: reason, localFiles: [], ignoredFiles: [],
+    disposableIgnored: 0, requiresDiscard: false, branchWillBeRetained: false });
+  expect(plan.entries[0]).toEqual(blocked(branchRow));
+  expect(plan.entries[2]).toEqual(blocked(detachedRow));
+  const alone = createActionService({ wtPath: "/wt", runner: twoRepoRunner([]), logPath: "/unused" });
+  expect([plan.entries[1], plan.entries[3]]).toEqual((await alone.prepareRemoval([branchRowB, detachedRowB])).entries);
+  expect(calls.some((call) => call[0] === "git" && call[2] === repo)).toBe(false);
+});
+
+test("removal lists the repo again right before each removal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  const calls: string[][] = [];
+  try {
+    const actions = createActionService({ wtPath: "/wt", runner: twoRepoRunner(calls), logPath: join(directory, "log") });
+    const plan = await actions.prepareRemoval([branchRow, detachedRow]);
+    const result = await actions.executeRemoval(plan, { [branchRow.id]: { include: true }, [detachedRow.id]: { include: true } });
+    expect(result.items.map((item) => item.status)).toEqual(["removed", "removed"]);
+    const wt = calls.filter((call) => call[0] === "/wt").map((call) => call.includes("remove") ? `remove ${call.at(-1)}` : "list");
+    expect(wt).toEqual(["list", "list", `remove ${branchRow.path}`, "list", `remove ${detachedRow.path}`]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
