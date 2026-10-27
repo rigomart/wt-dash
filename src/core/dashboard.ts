@@ -1,6 +1,6 @@
 import { assess } from "./assess";
 import { readComparisonBase } from "./base";
-import { discoverRepos } from "./discovery";
+import { countLinkedWorktrees, discoverRepos } from "./discovery";
 import { parseWorktrunk, SchemaMismatchError } from "./worktrunk";
 import type {
   CommandRunner,
@@ -16,6 +16,7 @@ interface DashboardOptions {
   runner: CommandRunner;
   sizeService: SizeService;
   discover?: (root: string, maxDepth: number) => Promise<string[]>;
+  countLinked?: (repo: string) => Promise<number | null>;
 }
 
 export function createDashboardService(options: DashboardOptions): DashboardService {
@@ -25,6 +26,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
   let generation = 0;
   let snapshot: DashboardSnapshot = {
     generation: 0,
+    repos: [],
     rows: [],
     progress: { phase: "idle", reposTotal: 0, reposDone: 0, startedAt: null, completedAt: null },
     errors: {},
@@ -89,6 +91,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       const kept = snapshot.fatalError ? [] : snapshot.rows;
       publish({
         generation: scanGeneration,
+        repos: snapshot.repos,
         rows: kept,
         progress: {
           phase: "scanning",
@@ -125,7 +128,18 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         return;
       }
       if (!current(scanGeneration)) return;
-      publish({ ...snapshot, progress: { ...snapshot.progress, reposTotal: repos.length } });
+      const counts = await Promise.all(repos.map(options.countLinked ?? countLinkedWorktrees));
+      if (!current(scanGeneration)) return;
+      const found = repos.map((path, index) => ({ path, linked: counts[index]! }));
+      publish({
+        ...snapshot,
+        repos: targeted
+          ? [...snapshot.repos.filter((repo) => !targeted.has(repo.path)), ...found].sort((a, b) =>
+              a.path.localeCompare(b.path),
+            )
+          : found,
+        progress: { ...snapshot.progress, reposTotal: repos.length },
+      });
       let nextRepo = 0;
       async function worker(): Promise<void> {
         while (nextRepo < repos.length && current(scanGeneration)) {

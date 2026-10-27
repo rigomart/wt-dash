@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverRepos } from "../src/core/discovery";
+import { countLinkedWorktrees, discoverRepos } from "../src/core/discovery";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -36,4 +36,14 @@ test("does not scan repositories inside installed dependencies or build output",
   await mkdir(join(root, "node_modules", "vendor", ".git"), { recursive: true });
   await mkdir(join(root, "build", ".git"), { recursive: true });
   expect(await discoverRepos(root, 3)).toEqual([join(root, "real")]);
+});
+
+test("counts linked worktrees from Git's records without running Git", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dash-discover-"));
+  roots.push(root);
+  await mkdir(join(root, "busy", ".git", "worktrees", "one"), { recursive: true });
+  await mkdir(join(root, "busy", ".git", "worktrees", "two"), { recursive: true });
+  await mkdir(join(root, "quiet", ".git"), { recursive: true });
+  expect(await countLinkedWorktrees(join(root, "busy"))).toBe(2);
+  expect(await countLinkedWorktrees(join(root, "quiet"))).toBe(0);
 });

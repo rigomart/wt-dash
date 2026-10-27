@@ -262,6 +262,7 @@ test("an old refresh cannot overwrite a newer snapshot", async () => {
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/repo"],
+    countLinked: async () => 2,
     runner: async () => {
       calls++;
       if (calls === 1) {
@@ -463,4 +464,52 @@ test("a fresh size saved while a rescan was listing still reaches the screen", a
   } finally {
     await service.close();
   }
+});
+
+test("publishes discovered repos with their linked worktree counts before listing them", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/opt/homebrew/bin/wt",
+    sizeService,
+    discover: async () => ["/one", "/two"],
+    countLinked: async (repo) => (repo === "/one" ? 3 : 0),
+    runner: async () => {
+      await gate;
+      return result();
+    },
+  });
+  const pending = service.refresh();
+  const early = await waitFor(service, (snapshot) => snapshot.repos.length === 2);
+  expect(early.rows).toEqual([]);
+  expect(early.repos).toEqual([
+    { path: "/one", linked: 3 },
+    { path: "/two", linked: 0 },
+  ]);
+  release();
+  await pending;
+  await service.close();
+});
+
+test("a targeted rescan recounts only its repos", async () => {
+  let linked = 1;
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/opt/homebrew/bin/wt",
+    sizeService,
+    discover: async () => ["/one", "/two"],
+    countLinked: async () => linked,
+    runner: async () => result(),
+  });
+  await service.refresh();
+  linked = 0;
+  await service.refresh(["/two"]);
+  expect(service.getSnapshot().repos).toEqual([
+    { path: "/one", linked: 1 },
+    { path: "/two", linked: 0 },
+  ]);
+  await service.close();
 });

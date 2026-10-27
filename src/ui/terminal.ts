@@ -45,7 +45,7 @@ export async function runTerminal(
   const actions = options.actions;
   const home = options.home ?? homedir();
   const theme = createTheme(renderer.themeMode);
-  const viewport: Viewport = { listTop: 0 };
+  const viewport: Viewport = { listTop: 0, projectsTop: 0, listScope: "" };
   let snapshot: DashboardSnapshot = service.getSnapshot();
   let state: UiState = initialState();
   let finished = false;
@@ -71,7 +71,7 @@ export async function runTerminal(
     return {
       snapshot,
       now: Date.now(),
-      pageSize: listPageSize(renderer.height),
+      pageSize: listPageSize(renderer.width, renderer.height),
       canAct: actions !== undefined,
       canExpand: listView(state, snapshot).focus !== null,
     };

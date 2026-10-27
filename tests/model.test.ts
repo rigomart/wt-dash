@@ -5,6 +5,7 @@ import {
   CONFIRM_ARM_MS,
   initialState,
   listView,
+  projectsView,
   update,
   type Context,
   type Key,
@@ -50,6 +51,7 @@ function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}):
 function context(rows: WorktreeRow[]): Context {
   const snapshot: DashboardSnapshot = {
     generation: 1,
+    repos: [],
     rows,
     errors: {},
     fatalError: null,
@@ -79,6 +81,11 @@ function press(state: UiState, ctx: Context, ...keys: Array<string | Partial<Key
   return state;
 }
 
+function openedWorktreeList(ctx: Context): UiState {
+  const state = update(initialState(), { type: "snapshot" }, ctx).state;
+  return state.screen.kind === "projects" ? press(state, ctx, "*") : state;
+}
+
 function send(state: UiState, ctx: Context, event: UiEvent) {
   return update(state, event, ctx);
 }
@@ -101,7 +108,7 @@ test("a selects every Safe row in view and pressing it again clears them", () =>
     row("c", 30, { verdict: "Review", mainState: "ahead" }),
     row("d", 5, { verdict: "Safe", locked: true }),
   ]);
-  let state = press(initialState(), ctx, "a");
+  let state = press(openedWorktreeList(ctx), ctx, "a");
   expect([...state.selected].sort()).toEqual(["a", "b"]);
   expect(state.toast?.text).toContain("Selected 2 Safe worktrees");
   state = press(state, ctx, "a");
@@ -110,7 +117,7 @@ test("a selects every Safe row in view and pressing it again clears them", () =>
 
 test("esc undoes one thing at a time", () => {
   const ctx = context([row("a", 10), row("b", 20)]);
-  let state = press(initialState(), ctx, " ", "2", "/", "b", { name: "return" });
+  let state = press(openedWorktreeList(ctx), ctx, " ", "2", "/", "b", { name: "return" });
   expect(state.search).toBe("b");
   state = press(state, ctx, { name: "escape" });
   expect(state.search).toBe("");
@@ -124,7 +131,7 @@ test("esc undoes one thing at a time", () => {
 
 test("sort keys cycle with their natural direction and S reverses", () => {
   const ctx = context([row("a", 10), row("b", 20)]);
-  let state = initialState();
+  let state = openedWorktreeList(ctx);
   expect(listView(state, ctx.snapshot).rows.map((item) => item.id)).toEqual(["b", "a"]);
   state = press(state, ctx, "S");
   expect(listView(state, ctx.snapshot).rows.map((item) => item.id)).toEqual(["a", "b"]);
@@ -140,7 +147,7 @@ test("rows follow verdict sections, or repos with Safe rows first when grouped",
     row("busy", 50, { verdict: "Busy", operation: "rebase" }),
     row("beta-safe", 70, { repoName: "beta", repoPath: "/repos/beta" }),
   ]);
-  let state = initialState();
+  let state = openedWorktreeList(ctx);
   let view = listView(state, ctx.snapshot);
   expect(view.sections.map((section) => section.kind === "verdict" && section.verdict)).toEqual([
     "Safe",
@@ -160,7 +167,7 @@ test("rows follow verdict sections, or repos with Safe rows first when grouped",
 
 test("a plan that arrives after esc cancelled the check is ignored", () => {
   const ctx = context([row("a", 10)]);
-  let result = send(initialState(), ctx, {
+  let result = send(openedWorktreeList(ctx), ctx, {
     type: "key",
     key: { name: "x", char: "x", ctrl: false },
   });
@@ -182,7 +189,7 @@ test("x then y removes the selection in the background with the choices the conf
     row("moved", 5),
   ];
   const ctx = context(rows);
-  let state = press(initialState(), ctx, "a", " ", "x");
+  let state = press(openedWorktreeList(ctx), ctx, "a", " ", "x");
   const plan = {
     entries: [
       entry(rows[0]!),
@@ -239,7 +246,7 @@ test("x then y removes the selection in the background with the choices the conf
 
 test("x on a blocked row explains why instead of checking it", () => {
   const ctx = context([row("locked", 10, { verdict: "Review", locked: true })]);
-  const result = send(initialState(), ctx, {
+  const result = send(openedWorktreeList(ctx), ctx, {
     type: "key",
     key: { name: "x", char: "x", ctrl: false },
   });
@@ -250,7 +257,7 @@ test("x on a blocked row explains why instead of checking it", () => {
 test("D explains that there is nothing extra to delete when every branch is merged", () => {
   const rows = [row("merged", 10)];
   const ctx = context(rows);
-  let state = press(initialState(), ctx, "x");
+  let state = press(openedWorktreeList(ctx), ctx, "x");
   state = send(state, ctx, {
     type: "planReady",
     token: state.pending!.token,
@@ -267,7 +274,7 @@ test("confirmed rows leave the list at once; failures come back with their reaso
     row("c", 30, { verdict: "Review", mainState: "ahead" }),
   ];
   const ctx = context(rows);
-  let state = press(initialState(), ctx, "a", "x");
+  let state = press(openedWorktreeList(ctx), ctx, "a", "x");
   const plan = { entries: rows.slice(0, 2).map((item) => entry(item)) };
   state = send(state, ctx, { type: "planReady", token: state.pending!.token, plan }).state;
   state = press(state, ctx, "y");
@@ -303,7 +310,7 @@ test("confirmed rows leave the list at once; failures come back with their reaso
 test("Ctrl-C during a removal stops after the current worktree and then quits", () => {
   const rows = [row("a", 10)];
   const ctx = context(rows);
-  let state = press(initialState(), ctx, "x");
+  let state = press(openedWorktreeList(ctx), ctx, "x");
   state = send(state, ctx, {
     type: "planReady",
     token: state.pending!.token,
@@ -324,7 +331,7 @@ test("Ctrl-C during a removal stops after the current worktree and then quits", 
 test("a second removal can be confirmed while the first runs, and each batch reports when it ends", () => {
   const rows = [row("a", 10), row("b", 20)];
   const ctx = context(rows);
-  let state = press(initialState(), ctx, "x");
+  let state = press(openedWorktreeList(ctx), ctx, "x");
   state = send(state, ctx, {
     type: "planReady",
     token: state.pending!.token,
@@ -361,7 +368,7 @@ test("a second removal can be confirmed while the first runs, and each batch rep
 test("enter confirms the dialog only once it has been on screen briefly", () => {
   const rows = [row("a", 10)];
   const ctx = context(rows);
-  let state = press(initialState(), ctx, { name: "return" });
+  let state = press(openedWorktreeList(ctx), ctx, { name: "return" });
   state = send(state, ctx, {
     type: "planReady",
     token: state.pending!.token,
@@ -384,7 +391,7 @@ test("enter confirms the dialog only once it has been on screen briefly", () => 
 
 test("enter on a Broken row prunes its repository instead of removing", () => {
   const ctx = context([row("gone", 10, { verdict: "Broken", prunable: true })]);
-  const result = send(initialState(), ctx, {
+  const result = send(openedWorktreeList(ctx), ctx, {
     type: "key",
     key: { name: "return", char: "\r", ctrl: false },
   });
@@ -393,8 +400,114 @@ test("enter on a Broken row prunes its repository instead of removing", () => {
 
 test("toasts expire on tick", () => {
   const ctx = context([row("a", 10)]);
-  const state = press(initialState(), { ...ctx, canExpand: false }, "i");
+  const state = press(openedWorktreeList(ctx), { ...ctx, canExpand: false }, "i");
   expect(state.toast).not.toBeNull();
   const later = send(state, { ...ctx, now: ctx.now + 60_000 }, { type: "tick" });
   expect(later.state.toast).toBeNull();
+});
+
+const beta = (id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}) =>
+  row(id, sizeKiB, {
+    repoName: "beta",
+    repoPath: "/repos/beta",
+    path: `/repos/beta/worktrees/${id}`,
+    ...overrides,
+  });
+
+test("several projects start on the projects screen; enter opens one and esc comes back to it", () => {
+  const ctx = context([
+    row("a", 10),
+    row("b", 20, { verdict: "Review", mainState: "ahead" }),
+    beta("c", 30),
+  ]);
+  let state = send(initialState(), ctx, { type: "snapshot" }).state;
+  expect(state.screen).toEqual({ kind: "projects" });
+  const view = projectsView(state, ctx.snapshot);
+  expect(view.projects.map((project) => [project.repoName, project.counts])).toEqual([
+    ["alpha", { Safe: 1, Review: 1, Busy: 0, Broken: 0 }],
+    ["beta", { Safe: 1, Review: 0, Busy: 0, Broken: 0 }],
+  ]);
+  expect(view.projects[0]).toMatchObject({ totalKiB: 30, safeKiB: 10 });
+  state = press(state, ctx, "j", { name: "return" });
+  expect(state.screen).toEqual({ kind: "project", repoPath: "/repos/beta" });
+  expect(listView(state, ctx.snapshot).rows.map((item) => item.id)).toEqual(["c"]);
+  state = press(state, ctx, { name: "escape" });
+  expect(state.screen).toEqual({ kind: "projects" });
+  expect(projectsView(state, ctx.snapshot).focus?.repoName).toBe("beta");
+});
+
+test("a scan that finds one project opens it, unless the user has already pressed a key", () => {
+  const ctx = context([row("a", 10)]);
+  ctx.snapshot = {
+    ...ctx.snapshot,
+    repos: [
+      { path: "/repos/alpha", linked: 1 },
+      { path: "/repos/quiet", linked: 0 },
+    ],
+  };
+  expect(send(initialState(), ctx, { type: "snapshot" }).state.screen).toEqual({
+    kind: "project",
+    repoPath: "/repos/alpha",
+  });
+  const pressed = press(initialState(), ctx, "?", { name: "escape" });
+  expect(send(pressed, ctx, { type: "snapshot" }).state.screen).toEqual({ kind: "projects" });
+});
+
+test("projects with linked worktrees show while their scan is pending, and empty repos are only counted", () => {
+  const ctx = context([]);
+  ctx.snapshot = {
+    ...ctx.snapshot,
+    repos: [
+      { path: "/repos/alpha", linked: 3 },
+      { path: "/repos/beta", linked: 2 },
+      { path: "/repos/quiet", linked: 0 },
+    ],
+    progress: { ...ctx.snapshot.progress, phase: "scanning" },
+  };
+  const view = projectsView(initialState(), ctx.snapshot);
+  expect(
+    view.projects.map((project) => [project.repoName, project.pending, project.linked]),
+  ).toEqual([
+    ["alpha", true, 3],
+    ["beta", true, 2],
+  ]);
+  expect(view.empty).toBe(1);
+});
+
+test("a on the projects screen selects that project's Safe worktrees and x removes them", () => {
+  const ctx = context([row("a", 10), row("b", 20), beta("c", 30)]);
+  let state = send(initialState(), ctx, { type: "snapshot" }).state;
+  expect(press(state, ctx, "x").toast?.text).toContain("Nothing selected");
+  state = press(state, ctx, "a");
+  expect([...state.selected].sort()).toEqual(["a", "b"]);
+  expect(state.toast?.text).toBe("Selected 2 Safe worktrees in alpha · up to 30 KB");
+  const result = send(state, ctx, { type: "key", key: { name: "x", char: "x", ctrl: false } });
+  expect(result.effects[0]).toMatchObject({
+    type: "prepareRemoval",
+    rows: [{ id: "a" }, { id: "b" }],
+  });
+});
+
+test("[ and ] step between projects, and / searches every project", () => {
+  const ctx = context([row("a", 10), beta("c", 30)]);
+  let state = press(send(initialState(), ctx, { type: "snapshot" }).state, ctx, { name: "return" });
+  expect(state.screen).toEqual({ kind: "project", repoPath: "/repos/alpha" });
+  state = press(state, ctx, "]");
+  expect(state.screen).toEqual({ kind: "project", repoPath: "/repos/beta" });
+  state = press(state, ctx, "]");
+  expect(state.screen).toEqual({ kind: "project", repoPath: "/repos/beta" });
+  state = press(state, ctx, "[", { name: "escape" }, "/", "b", "e", "t", "a");
+  expect(state.screen).toEqual({ kind: "all" });
+  expect(listView(state, ctx.snapshot).rows.map((item) => item.id)).toEqual(["c"]);
+});
+
+test("projects are ordered by how many worktrees they have, then by name", () => {
+  const ctx = context([
+    row("a", 10),
+    beta("b", 10),
+    beta("c", 10),
+    row("d", 10, { repoName: "gamma", repoPath: "/repos/gamma", path: "/repos/gamma/d" }),
+  ]);
+  const view = projectsView(initialState(), ctx.snapshot);
+  expect(view.projects.map((project) => project.repoName)).toEqual(["beta", "alpha", "gamma"]);
 });
