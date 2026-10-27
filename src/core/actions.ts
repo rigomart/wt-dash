@@ -142,29 +142,30 @@ export function createActionService(options: {
     return (result.stdout + "\n" + result.stderr).split("\n").map((line) => line.trim()).filter(Boolean);
   }
 
+  // Repos run up to 3 at once; each repo's removals stay in plan order so Git's per-repo locks never collide.
   async function removeBatch(plan: RemovalPlan, choices: Record<string, RemovalChoice>,
     onProgress?: RemovalProgress, shouldStop?: () => boolean): Promise<RemovalResult> {
-    const items: RemovalResult["items"] = [];
-    const warnings: string[] = [];
+    const items = new Array<RemovalResult["items"][number]>(plan.entries.length);
+    const notes = plan.entries.map((): string[] => []);
     const succeededRepos = new Set<string>();
     const before = await diskSpace();
-    for (const entry of plan.entries) {
+
+    async function removeEntry(entry: RemovalEntry, index: number): Promise<void> {
       const { row } = entry;
       const choice = choices[row.id];
       const skip = (error: string) => {
-        items.push({ id: row.id, status: "skipped", error });
+        items[index] = { id: row.id, status: "skipped", error };
         onProgress?.(row.id, "skipped");
       };
-      if (shouldStop?.()) { skip("Cancelled"); continue; }
-      if (entry.blockedReason || !choice?.include) { skip(entry.blockedReason ?? "Not confirmed"); continue; }
-      if (entry.requiresDiscard && !choice.discardChanges) { skip("Discarding local files was not confirmed"); continue; }
-      if (choice.forceDeleteBranch && !entry.branchWillBeRetained) { skip("Forced branch deletion does not apply"); continue; }
+      if (shouldStop?.()) return skip("Cancelled");
+      if (entry.blockedReason || !choice?.include) return skip(entry.blockedReason ?? "Not confirmed");
+      if (entry.requiresDiscard && !choice.discardChanges) return skip("Discarding local files was not confirmed");
+      if (choice.forceDeleteBranch && !entry.branchWillBeRetained) return skip("Forced branch deletion does not apply");
       let current: RemovalEntry;
       try { current = await checkRow(row); }
-      catch (error) { skip(String(error)); continue; }
+      catch (error) { return skip(String(error)); }
       if (current.blockedReason || filesStamp(current) !== filesStamp(entry)) {
-        skip(current.blockedReason ?? "Local files changed since preview");
-        continue;
+        return skip(current.blockedReason ?? "Local files changed since preview");
       }
       const flags = [choice.discardChanges && entry.requiresDiscard ? "-f" : null,
         choice.forceDeleteBranch ? "-D" : null,
@@ -186,25 +187,45 @@ export function createActionService(options: {
           throw new Error("Unexpected Worktrunk removal result");
         }
         branchOutcome = value.branch_outcome;
-        items.push({ id: row.id, status: "removed", branchOutcome });
+        items[index] = { id: row.id, status: "removed", branchOutcome };
         succeededRepos.add(row.repoPath);
         onProgress?.(row.id, "removed");
       } catch (cause) {
         error = String(cause);
         const status = exitCode === 0 ? "unverified" : "failed";
-        items.push({ id: row.id, status, error });
+        items[index] = { id: row.id, status, error };
         onProgress?.(row.id, status);
         if (status === "unverified") {
-          warnings.push(`Removal outcome for ${row.path} could not be verified; check the refreshed list`);
+          notes[index]!.push(`Removal outcome for ${row.path} could not be verified; check the refreshed list`);
           succeededRepos.add(row.repoPath);
         }
       }
       try {
         await log({ timestamp: new Date().toISOString(), repo: row.repoPath, branch: row.branch,
           path: row.path, flags, exitCode, branchOutcome: branchOutcome ?? null, error: error ?? null });
-      } catch (cause) { warnings.push(`Could not write removal log for ${row.path}: ${String(cause)}`); }
+      } catch (cause) { notes[index]!.push(`Could not write removal log for ${row.path}: ${String(cause)}`); }
     }
-    for (const repo of succeededRepos) {
+
+    const repos = [...new Set(plan.entries.map((entry) => entry.row.repoPath))];
+    let nextRepo = 0;
+    let broken = false;
+    async function worker(): Promise<void> {
+      while (!broken && nextRepo < repos.length) {
+        const repo = repos[nextRepo++]!;
+        for (const [index, entry] of plan.entries.entries()) {
+          if (entry.row.repoPath !== repo) continue;
+          if (broken) return;
+          try { await removeEntry(entry, index); }
+          catch (error) { broken = true; throw error; }
+        }
+      }
+    }
+    // Wait for every worker, even after one throws, so the queue never starts the next batch beside a running removal.
+    const settled = await Promise.allSettled(Array.from({ length: Math.min(3, repos.length) }, () => worker()));
+    const thrown = settled.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+    if (thrown) throw thrown.reason;
+    const warnings = notes.flat();
+    for (const repo of repos.filter((path) => succeededRepos.has(path))) {
       try {
         const result = await options.runner("git", ["-C", repo, "worktree", "prune"]);
         if (result.exitCode !== 0) warnings.push(`Could not prune ${repo}: ${result.stderr.trim()}`);

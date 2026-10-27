@@ -304,11 +304,11 @@ function onKey(state: UiState, key: Key, ctx: Context): Result {
   return onListKey(state, key, ctx);
 }
 
-/** Quitting never interrupts a running `wt remove`; it waits for the current worktree. */
+/** Quitting never interrupts a running `wt remove`; it waits for the removals in progress. */
 function quitRequest(state: UiState, ctx: Context): Result {
   if (state.pruning) return same(toast(state, ctx, "Still pruning; try again in a moment", "warn"));
   if (state.jobs.length) {
-    return same(toast({ ...stopJobs(state), quitAfterJobs: true }, ctx, "Quitting after the current worktree is removed", "warn", 60_000));
+    return same(toast({ ...stopJobs(state), quitAfterJobs: true }, ctx, "Quitting after the removals in progress finish", "warn", 60_000));
   }
   return quit(state);
 }
@@ -454,7 +454,7 @@ function clearStep(state: UiState, ctx: Context): UiState {
   if (state.selected.size) return toast({ ...state, selected: new Set() }, ctx, `Cleared ${countLabel(state.selected.size, "selection")}`);
   if (state.tab !== "All") return { ...state, tab: "All" };
   if (state.jobs.some((job) => !job.stopping)) {
-    return toast(stopJobs(state), ctx, "Stopping after the current worktree", "warn", 60_000);
+    return toast(stopJobs(state), ctx, "Stopping after the removals in progress", "warn", 60_000);
   }
   return state;
 }

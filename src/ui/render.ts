@@ -434,15 +434,17 @@ function progressLine(state: UiState, ctx: RenderContext): Line {
   const total = statuses.length;
   const done = statuses.filter((status) => status !== "waiting" && status !== "removing").length;
   const failed = statuses.filter((status) => status === "failed" || status === "skipped" || status === "unverified").length;
-  const current = state.jobs.flatMap((job) => job.plan.entries).find((entry) => jobStatus(state, entry.row.id) === "removing");
+  const running = state.jobs.flatMap((job) => job.plan.entries).filter((entry) => jobStatus(state, entry.row.id) === "removing");
   const stopping = state.jobs.every((job) => job.stopping);
-  const text = `Removing ${Math.min(done + 1, total)} of ${total}` + (current ? `: ${branchLabel(current.row)}` : "");
+  const text = `Removing ${Math.min(done + 1, total)} of ${total}` + (running.length ? `: ${branchLabel(running[0]!.row)}` : "")
+    + (running.length > 1 ? ` +${running.length - 1} more` : "");
   const barWidth = Math.max(0, Math.min(24, width - textWidth(text) - 40));
   const filled = total ? Math.round((done / total) * barWidth) : 0;
   const left: Line = [seg(spinner(state), { fg: theme.accent }), seg(` ${text}  `)];
   if (barWidth >= 6) left.push(seg("━".repeat(filled), { fg: theme.safe }), dim("━".repeat(barWidth - filled)), seg("  "));
   if (failed) left.push(seg(`${failed} not removed  `, { fg: theme.review }));
-  const right: Line = stopping ? [seg("stopping after this one", { fg: theme.review })] : keyHints(theme, [["esc", "stop after this one"]]);
+  const after = running.length > 1 ? "after current" : "after this one";
+  const right: Line = stopping ? [seg(`stopping ${after}`, { fg: theme.review })] : keyHints(theme, [["esc", `stop ${after}`]]);
   return spread(left, right, width);
 }
 

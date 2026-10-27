@@ -282,6 +282,7 @@ test("x then y removes in the background while the table stays on screen", async
     frame = await ui.frame();
     expect(executed).toHaveLength(1);
     expect(frame).toContain("Removing 1 of 1: api");
+    expect(frame).toContain("esc stop after this one");
     expect(frame).toContain("1 worktree · up to 500 KB");
     expect(frame).not.toContain("• api");
     expect(focused(frame)).toContain("docs");
@@ -289,6 +290,44 @@ test("x then y removes in the background while the table stays on screen", async
     frame = await ui.frame();
     expect(frame).toContain("Removed 1 worktree · freed 2.0 MB");
     expect(frame).not.toContain("Removing 1 of 1");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("the progress line names the first running removal and counts the others", async () => {
+  const items = [row("a", 300), row("b", 200), row("c", 100)];
+  const steps: Array<() => void> = [];
+  const step = () => new Promise<void>((resolve) => { steps.push(resolve); });
+  const { actions } = fakeActions((rows) => rows.map((selected) => entry(selected)), {
+    executeRemoval: async (_plan, _choices, onProgress) => {
+      for (const item of items) onProgress?.(item.id, "removing");
+      await step();
+      onProgress?.("a", "removed");
+      onProgress?.("b", "removed");
+      await step();
+      onProgress?.("c", "removed");
+      return { items: items.map((item) => ({ id: item.id, status: "removed" as const })), freedKiB: null, warnings: [] };
+    },
+  });
+  const ui = await start(130, 24, items, actions);
+  try {
+    ui.setup.mockInput.pressKey("a");
+    ui.setup.mockInput.pressKey("x");
+    await ui.frame();
+    ui.setup.mockInput.pressKey("y");
+    let frame = await ui.frame();
+    expect(frame).toContain("Removing 1 of 3: a +2 more");
+    expect(frame).toContain("esc stop after current");
+    ui.setup.mockInput.pressEscape();
+    expect(await ui.frame()).toContain("stopping after current");
+    steps.shift()!();
+    frame = await ui.frame();
+    expect(frame).toContain("Removing 3 of 3: c ");
+    expect(frame).not.toMatch(/\+\d more/);
+    expect(frame).toContain("stopping after this one");
+    steps.shift()!();
+    expect(await ui.frame()).toContain("Removed 3 worktrees");
   } finally {
     await ui.stop();
   }

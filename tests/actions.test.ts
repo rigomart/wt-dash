@@ -384,3 +384,167 @@ test("removal lists the repo again right before each removal", async () => {
     expect(wt).toEqual(["list", "list", `remove ${branchRow.path}`, "list", `remove ${detachedRow.path}`]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+function repoRows(path: string) {
+  const payload = structuredClone(fixture);
+  payload.items[0]!.worktree!.path = path;
+  payload.items[1]!.worktree!.path = `${path}/.claude/worktrees/b`;
+  payload.items[2]!.worktree!.path = `${path}-detached`;
+  return { payload, rows: parseWorktrunk(path, JSON.stringify(payload)) };
+}
+
+/** Fake Git and Worktrunk across repos; with `hold`, each `wt remove` waits until the test releases its path. */
+function parallelRunner(repos: Array<ReturnType<typeof repoRows>>, options: {
+  hold?: boolean; remove?: (path: string) => ReturnType<typeof commandResult>; prune?: ReturnType<typeof commandResult>;
+} = {}) {
+  const events: string[] = [];
+  const running = new Set<string>();
+  let peak = 0;
+  const gates = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+  const gate = (path: string) => {
+    if (!gates.has(path)) {
+      let resolve!: () => void;
+      gates.set(path, { promise: new Promise<void>((done) => { resolve = done; }), resolve });
+    }
+    return gates.get(path)!;
+  };
+  const waiters: Array<() => void> = [];
+  const started = () => events.filter((event) => event.startsWith("start ")).map((event) => event.slice(6));
+  const runner: CommandRunner = async (_command, args) => {
+    if (args.includes("list")) {
+      events.push(`list ${args[1]}`);
+      return commandResult(JSON.stringify(repos.find((item) => item.rows[0]!.repoPath === args[1])!.payload));
+    }
+    if (args.includes("remove")) {
+      const path = args.at(-1)!;
+      running.add(path);
+      peak = Math.max(peak, running.size);
+      events.push(`start ${path}`);
+      waiters.splice(0).forEach((wake) => wake());
+      if (options.hold) await gate(path).promise;
+      running.delete(path);
+      events.push(`end ${path}`);
+      return options.remove?.(path) ?? commandResult(JSON.stringify({ kind: "worktree", path, branch_outcome: "deleted" }));
+    }
+    if (args.includes("prune")) return options.prune ?? commandResult();
+    return commandResult();
+  };
+  async function untilStarted(count: number): Promise<string[]> {
+    while (started().length < count) await new Promise<void>((wake) => waiters.push(wake));
+    return started();
+  }
+  return { runner, events, running, peak: () => peak, release: (path: string) => gate(path).resolve(), untilStarted };
+}
+
+async function withActions(runner: CommandRunner, body: (actions: ReturnType<typeof createActionService>) => Promise<void>) {
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  try { await body(createActionService({ wtPath: "/wt", runner, logPath: join(directory, "log") })); }
+  finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+const include = (rows: Array<{ id: string }>) => Object.fromEntries(rows.map((row) => [row.id, { include: true }]));
+const repoP = repoRows("/Users/test/repos/p");
+const repoQ = repoRows("/Users/test/repos/q");
+const repoR = repoRows("/Users/test/repos/r");
+const repoS = repoRows("/Users/test/repos/s");
+
+test("removals in different repos overlap, at most three at once", async () => {
+  const fake = parallelRunner([repoP, repoQ, repoR, repoS], { hold: true });
+  await withActions(fake.runner, async (actions) => {
+    const input = [repoP.rows[0]!, repoQ.rows[0]!, repoR.rows[0]!, repoS.rows[0]!];
+    const run = actions.executeRemoval(await actions.prepareRemoval(input), include(input));
+    expect(await fake.untilStarted(3)).toEqual(input.slice(0, 3).map((row) => row.path));
+    expect(fake.running.size).toBe(3);
+    fake.release(input[1]!.path);
+    expect((await fake.untilStarted(4))[3]).toBe(input[3]!.path);
+    for (const row of input) fake.release(row.path);
+    expect((await run).items.map((item) => item.status)).toEqual(["removed", "removed", "removed", "removed"]);
+    expect(fake.peak()).toBe(3);
+  });
+});
+
+test("removals in one repo run one at a time in plan order, each right after its own listing", async () => {
+  const fake = parallelRunner([repoP, repoQ], { hold: true });
+  await withActions(fake.runner, async (actions) => {
+    const [p1, p2] = repoP.rows as [typeof branchRow, typeof branchRow];
+    const [q1, q2] = repoQ.rows as [typeof branchRow, typeof branchRow];
+    const input = [p1, q1, p2, q2];
+    const plan = await actions.prepareRemoval(input);
+    fake.events.length = 0;
+    const run = actions.executeRemoval(plan, include(input));
+    expect(await fake.untilStarted(2)).toEqual([p1.path, q1.path]);
+    fake.release(q1.path);
+    expect((await fake.untilStarted(3))[2]).toBe(q2.path);
+    expect(fake.running.has(p2.path)).toBe(false);
+    for (const row of input) fake.release(row.path);
+    expect((await run).items.map((item) => item.status)).toEqual(["removed", "removed", "removed", "removed"]);
+    for (const [first, second] of [[p1, p2], [q1, q2]]) {
+      expect(fake.events.filter((event) => event.includes(first!.repoPath))).toEqual([`list ${first!.repoPath}`,
+        `start ${first!.path}`, `end ${first!.path}`, `list ${first!.repoPath}`, `start ${second!.path}`, `end ${second!.path}`]);
+    }
+  });
+});
+
+test("results and warnings keep plan order when a later repo finishes first", async () => {
+  const fake = parallelRunner([repoP, repoQ], { hold: true, remove: () => commandResult("not JSON"), prune: commandResult("", 1) });
+  await withActions(fake.runner, async (actions) => {
+    const [p1, q1] = [repoP.rows[0]!, repoQ.rows[0]!];
+    const finished: string[] = [];
+    let laterDone!: () => void;
+    const laterFinished = new Promise<void>((resolve) => { laterDone = resolve; });
+    const run = actions.executeRemoval(await actions.prepareRemoval([p1, q1]), include([p1, q1]), (id, status) => {
+      if (status === "removing") return;
+      finished.push(id);
+      if (id === q1.id) laterDone();
+    });
+    await fake.untilStarted(2);
+    fake.release(q1.path);
+    await laterFinished;
+    fake.release(p1.path);
+    const result = await run;
+    expect(finished).toEqual([q1.id, p1.id]);
+    expect(result.items.map((item) => [item.id, item.status])).toEqual([[p1.id, "unverified"], [q1.id, "unverified"]]);
+    expect(result.warnings).toEqual([
+      `Removal outcome for ${p1.path} could not be verified; check the refreshed list`,
+      `Removal outcome for ${q1.path} could not be verified; check the refreshed list`,
+      `Could not prune ${p1.repoPath}: command failed`,
+      `Could not prune ${q1.repoPath}: command failed`,
+    ]);
+  });
+});
+
+test("stop lets running removals finish, starts nothing new, and cancels the rest", async () => {
+  const fake = parallelRunner([repoP, repoQ, repoR, repoS], { hold: true });
+  await withActions(fake.runner, async (actions) => {
+    const input = [repoP.rows[0]!, repoP.rows[1]!, repoQ.rows[0]!, repoR.rows[0]!, repoS.rows[0]!];
+    const terminal: string[] = [];
+    let stop = false;
+    const run = actions.executeRemoval(await actions.prepareRemoval(input), include(input),
+      (id, status) => { if (status !== "removing") terminal.push(id); }, () => stop);
+    expect(await fake.untilStarted(3)).toEqual([input[0]!.path, input[2]!.path, input[3]!.path]);
+    stop = true;
+    for (const row of input) fake.release(row.path);
+    const result = await run;
+    expect(result.items).toEqual([
+      { id: input[0]!.id, status: "removed", branchOutcome: "deleted" },
+      { id: input[1]!.id, status: "skipped", error: "Cancelled" },
+      { id: input[2]!.id, status: "removed", branchOutcome: "deleted" },
+      { id: input[3]!.id, status: "removed", branchOutcome: "deleted" },
+      { id: input[4]!.id, status: "skipped", error: "Cancelled" },
+    ]);
+    expect(fake.events.filter((event) => event.startsWith("start "))).toHaveLength(3);
+    expect([...terminal].sort()).toEqual(input.map((row) => row.id).sort());
+  });
+});
+
+test("a failed removal in one repo leaves the other repo's removals alone", async () => {
+  const fake = parallelRunner([repoP, repoQ], { remove: (path) => path === repoP.rows[0]!.path
+    ? commandResult("", 1) : commandResult(JSON.stringify({ kind: "worktree", path, branch_outcome: "deleted" })) });
+  await withActions(fake.runner, async (actions) => {
+    const input = [repoP.rows[0]!, repoQ.rows[0]!, repoP.rows[1]!, repoQ.rows[1]!];
+    const result = await actions.executeRemoval(await actions.prepareRemoval(input), include(input));
+    expect(result.items.map((item) => item.status)).toEqual(["failed", "removed", "removed", "removed"]);
+    expect(result.items[0]?.error).toBe("Error: wt remove exited 1: command failed");
+    expect(result.warnings).toEqual([]);
+  });
+});

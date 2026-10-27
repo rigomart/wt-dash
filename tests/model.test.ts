@@ -174,7 +174,7 @@ test("confirmed rows leave the list at once; failures come back with their reaso
   expect(state.gone.size).toBe(0);
 });
 
-test("Ctrl-C during a removal stops after the current worktree and then quits", () => {
+test("Ctrl-C during a removal stops after the removals in progress and then quits", () => {
   const rows = [row("a", 10)];
   const ctx = context(rows);
   let state = press(initialState(), ctx, "x");
