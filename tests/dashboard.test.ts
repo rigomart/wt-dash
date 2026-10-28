@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import fixture from "./fixtures/list-v2.json";
-import { createDashboardService } from "../src/core/dashboard";
+import { createDashboardService, listingOrder } from "../src/core/dashboard";
 import type {
   CommandRunner,
   DashboardService,
@@ -262,7 +262,7 @@ test("an old refresh cannot overwrite a newer snapshot", async () => {
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/repo"],
-    countLinked: async () => 2,
+    readLinked: async () => ({ count: 2, paths: [] }),
     runner: async () => {
       calls++;
       if (calls === 1) {
@@ -476,7 +476,7 @@ test("publishes discovered repos with their linked worktree counts before listin
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/one", "/two"],
-    countLinked: async (repo) => (repo === "/one" ? 3 : 0),
+    readLinked: async (repo) => ({ count: repo === "/one" ? 3 : 0, paths: [] }),
     runner: async () => {
       await gate;
       return result();
@@ -501,7 +501,7 @@ test("a targeted rescan recounts only its repos", async () => {
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/one", "/two"],
-    countLinked: async () => linked,
+    readLinked: async () => ({ count: linked, paths: [] }),
     runner: async () => result(),
   });
   await service.refresh();
@@ -512,4 +512,30 @@ test("a targeted rescan recounts only its repos", async () => {
     { path: "/two", linked: 0 },
   ]);
   await service.close();
+});
+
+test("repos are listed most worktrees first, with the one that took the most space last time second", () => {
+  const linked = (count: number, paths: string[] = []) => ({ count, paths });
+  const sizes: Record<string, number> = { "/trees/h1": 900, "/trees/h2": 900, "/trees/b1": 50 };
+  const { order, first } = listingOrder(
+    [
+      { path: "/r/alpha", linked: linked(2) },
+      { path: "/r/big", linked: linked(9, ["/trees/b1"]) },
+      { path: "/r/heavy", linked: linked(2, ["/trees/h1", "/trees/h2"]) },
+      { path: "/r/gone", linked: null },
+      { path: "/r/mid", linked: linked(5) },
+    ],
+    (path) => sizes[path] ?? null,
+  );
+  expect(order).toEqual(["/r/big", "/r/heavy", "/r/mid", "/r/alpha", "/r/gone"]);
+  expect([...first]).toEqual(["/r/big", "/r/heavy"]);
+  const unmeasured = listingOrder(
+    [
+      { path: "/r/alpha", linked: linked(2) },
+      { path: "/r/big", linked: linked(9) },
+    ],
+    () => null,
+  );
+  expect(unmeasured.order).toEqual(["/r/big", "/r/alpha"]);
+  expect([...unmeasured.first]).toEqual(["/r/big"]);
 });

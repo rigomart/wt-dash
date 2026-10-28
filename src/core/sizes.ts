@@ -41,6 +41,7 @@ export function createSizeService(
   now: () => number = Date.now,
 ): SizeService {
   const cache = new Map<string, SizeEntry>();
+  const firstWaiters: Array<() => void> = [];
   const uncachedWaiters: Array<() => void> = [];
   const cachedWaiters: Array<() => void> = [];
   const tasks = new Set<Promise<SizeEntry | null>>();
@@ -51,14 +52,14 @@ export function createSizeService(
   let writeNumber = 0;
   let writes: Promise<void> = Promise.resolve();
 
-  async function acquire(hadEntry: boolean): Promise<boolean> {
+  async function acquire(hadEntry: boolean, first: boolean): Promise<boolean> {
     if (closed) return false;
     if (active < concurrency) {
       active++;
       return true;
     }
     await new Promise<void>((resolve) =>
-      (hadEntry ? cachedWaiters : uncachedWaiters).push(resolve),
+      (first ? firstWaiters : hadEntry ? cachedWaiters : uncachedWaiters).push(resolve),
     );
     return !closed;
   }
@@ -68,7 +69,7 @@ export function createSizeService(
       active--;
       return;
     }
-    const next = uncachedWaiters.shift() ?? cachedWaiters.shift();
+    const next = firstWaiters.shift() ?? uncachedWaiters.shift() ?? cachedWaiters.shift();
     if (next) next();
     else active--;
   }
@@ -99,8 +100,8 @@ export function createSizeService(
     );
   }
 
-  async function run(path: string): Promise<SizeEntry | null> {
-    if (!(await acquire(cache.has(path)))) return null;
+  async function run(path: string, first = false): Promise<SizeEntry | null> {
+    if (!(await acquire(cache.has(path), first))) return null;
     try {
       // Stat before du, so a change made while du runs is caught next time.
       const signature = await readSignature(path);
@@ -163,11 +164,11 @@ export function createSizeService(
       if (closed) return Promise.resolve(null);
       return track(run(path));
     },
-    measureIfStale(path) {
+    measureIfStale(path, first = false) {
       if (closed) return Promise.resolve(null);
       const pending = inFlight.get(path);
       if (pending) return pending;
-      const task = track(isFresh(path).then((fresh) => (fresh ? null : run(path))));
+      const task = track(isFresh(path).then((fresh) => (fresh ? null : run(path, first))));
       inFlight.set(path, task);
       void task.finally(() => inFlight.delete(path));
       return task;
@@ -175,7 +176,12 @@ export function createSizeService(
     async close() {
       closed = true;
       abort.abort();
-      for (const resume of [...uncachedWaiters.splice(0), ...cachedWaiters.splice(0)]) resume();
+      for (const resume of [
+        ...firstWaiters.splice(0),
+        ...uncachedWaiters.splice(0),
+        ...cachedWaiters.splice(0),
+      ])
+        resume();
       await Promise.allSettled(tasks);
       await writes;
     },

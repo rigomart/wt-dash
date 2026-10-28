@@ -396,6 +396,23 @@ test("a stale saved size still queues behind paths with no saved size", async ()
   await sizes.close();
 });
 
+test("a measurement asked for first runs ahead of everything already waiting", async () => {
+  const fake = gatedRunner();
+  const sizes = createSizeService(await cachePath(), fake.runner, 1, clock().now);
+  const busy = sizes.measure("/busy");
+  await fake.reached(1);
+  const results = [sizes.measureIfStale("/other"), sizes.measureIfStale("/focused", true)];
+  await Bun.sleep(0);
+  fake.gates.get("/busy")!();
+  await fake.reached(2);
+  fake.gates.get("/focused")!();
+  await fake.reached(3);
+  fake.gates.get("/other")!();
+  await Promise.all([busy, ...results]);
+  expect(fake.started).toEqual(["/busy", "/focused", "/other"]);
+  await sizes.close();
+});
+
 test("overlapping stale checks for one path share a single du run", async () => {
   const fake = gatedRunner();
   const sizes = createSizeService(await cachePath(), fake.runner, 1, clock().now);
