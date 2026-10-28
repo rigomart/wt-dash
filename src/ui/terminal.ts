@@ -71,7 +71,7 @@ export async function runTerminal(
     return {
       snapshot,
       now: Date.now(),
-      pageSize: listPageSize(renderer.width, renderer.height),
+      pageSize: listPageSize(renderer.height),
       canAct: actions !== undefined,
       canExpand: listView(state, snapshot).focus !== null,
     };

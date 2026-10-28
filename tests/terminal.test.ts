@@ -76,6 +76,10 @@ function fakeService(
   return {
     service,
     getRefreshes: () => refreshes,
+    update: (next: Partial<DashboardSnapshot>) => {
+      snapshot = { ...snapshot, ...next };
+      for (const listener of listeners) listener(snapshot);
+    },
     setRows: (
       nextRows: WorktreeRow[],
       phase: DashboardSnapshot["progress"]["phase"] = "complete",
@@ -126,8 +130,19 @@ function fakeActions(
   return { actions, executed };
 }
 
+function withoutSidebar(frame: string): string {
+  return frame
+    .split("\n")
+    .map((line) => (line.includes(" │ ") ? line.slice(line.indexOf(" │ ") + 3) : line))
+    .join("\n");
+}
+
 function focused(frame: string): string {
-  return frame.split("\n").find((line) => line.startsWith("▌")) ?? "";
+  const lines = frame.split("\n");
+  const row = lines.find((line) => line.includes("│ ▌"));
+  return row
+    ? row.slice(row.indexOf("│ ▌") + 2)
+    : (lines.find((line) => line.startsWith("▌")) ?? "");
 }
 
 async function start(
@@ -164,7 +179,7 @@ async function start(
   return { setup, fake, running, frame, escape, stop };
 }
 
-test("rows sit under verdict sections with their reasons, and the focused row's details sit beside them", async () => {
+test("rows sit under verdict sections with their reasons, and the focused row's details sit under them", async () => {
   const ui = await start(170, 30, [
     row("api", 2000),
     row("docs", 500, {
@@ -185,9 +200,9 @@ test("rows sit under verdict sections with their reasons, and the focused row's 
     expect(frame).toContain("merged  Its content is already in main");
     expect(frame).toContain("unmerged commits  Some commits aren't in main");
     expect(focused(frame)).toContain("api");
-    expect(frame).toContain("│ alpha / api");
+    expect(frame).toContain("api  ● Safe · merged");
     expect(frame).toContain("~/alpha/worktrees/api");
-    expect(frame).toContain("CREATED BY    Claude Code");
+    expect(frame).toContain("Claude Code · last commit");
     expect(frame).toContain("? keys");
   } finally {
     await ui.stop();
@@ -229,7 +244,7 @@ test("search filters as you type, matches repo names, and r rescans", async () =
   try {
     ui.setup.mockInput.pressKey("/");
     await ui.setup.mockInput.typeText("beta");
-    let frame = await ui.frame();
+    let frame = withoutSidebar(await ui.frame());
     expect(frame).toContain("docs");
     expect(frame).not.toContain("api");
     expect(frame).toContain("1 of 2");
@@ -291,7 +306,8 @@ test("v groups by repo, Safe rows first in each repo, and movement follows the v
     row("d", 1000),
   ]);
   try {
-    ui.setup.mockInput.pressKey("*");
+    ui.setup.mockInput.pressKey("g");
+    ui.setup.mockInput.pressEnter();
     ui.setup.mockInput.pressKey("v");
     ui.setup.mockInput.pressArrow("down");
     const frame = await ui.frame();
@@ -355,7 +371,11 @@ test("details pane lists uncommitted changes and summarizes ignored files quietl
   const ui = await start(130, 30, [row("api", 2000)], actions);
   try {
     await Bun.sleep(200);
-    const frame = await ui.frame();
+    let frame = await ui.frame();
+    expect(frame).toContain("uncommitted  notes.md");
+    expect(frame).toContain("ignored  .env  data.sqlite · 2 cache");
+    ui.setup.mockInput.pressKey("i");
+    frame = await ui.frame();
     expect(frame).toContain("UNCOMMITTED   notes.md");
     expect(frame).toContain("IGNORED       .env  data.sqlite · 2 cache");
   } finally {
@@ -527,8 +547,8 @@ test("a missing folder offers pruning and Enter opens its prune confirmation", a
   }
 });
 
-test("several projects open on a projects table, and enter shows one project's worktrees", async () => {
-  const ui = await start(130, 20, [
+test("below 100 columns, several projects open on a projects table, and enter shows one project's worktrees", async () => {
+  const ui = await start(90, 20, [
     row("api", 2000),
     row("docs", 500, { verdict: "Review", mainState: "ahead" }),
     row("web", 3000, {
@@ -542,6 +562,7 @@ test("several projects open on a projects table, and enter shows one project's w
     expect(frame).toContain("2 projects · 3 worktrees");
     expect(frame).toContain("PROJECT");
     expect(frame).toContain("SAFE SIZE");
+    expect(frame).toMatch(/All projects\s+3\s+2\s+1\s+·\s+·\s+4\.9 MB\s+5\.4 MB/);
     expect(focused(frame)).toMatch(/alpha\s+2\s+1\s+1\s+·\s+·\s+2\.0 MB\s+2\.4 MB/);
     expect(frame).toContain("enter open");
     ui.setup.mockInput.pressArrow("down");
@@ -550,7 +571,48 @@ test("several projects open on a projects table, and enter shows one project's w
     expect(frame).toContain("wt-dash › beta");
     expect(focused(frame)).toContain("web");
     expect(frame).not.toContain("api");
-    expect(frame).toContain("esc projects");
+    expect(frame).toContain("← projects");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("at 100 columns and wider, projects sit in a sidebar and the list follows the focused one", async () => {
+  const ui = await start(130, 24, [
+    row("api", 2000),
+    row("docs", 500, { verdict: "Review", mainState: "ahead" }),
+    row("web", 3000, {
+      repoName: "beta",
+      repoPath: "/repos/beta",
+      path: "/repos/beta/worktrees/web",
+    }),
+  ]);
+  try {
+    let frame = await ui.frame();
+    expect(frame).toContain("PROJECTS");
+    expect(frame).toMatch(/All projects 3\s+4\.9 MB │/);
+    expect(focused(frame)).toMatch(/^▌ alpha 2\s+2\.0 MB │/);
+    expect(frame).toContain("wt-dash › alpha");
+    expect(frame).toContain("api");
+    expect(frame).not.toContain("web");
+    expect(frame).toContain("→ worktrees");
+    ui.setup.mockInput.pressArrow("down");
+    frame = await ui.frame();
+    expect(frame).toContain("wt-dash › beta");
+    expect(frame).toContain("web");
+    expect(frame).not.toContain("api");
+    ui.setup.mockInput.pressArrow("right");
+    frame = await ui.frame();
+    expect(focused(frame)).toContain("web");
+    expect(frame).toContain("← projects");
+    ui.setup.mockInput.pressArrow("left");
+    expect(focused(await ui.frame())).toMatch(/^▌ beta 1/);
+    ui.setup.mockInput.pressKey("g");
+    ui.setup.mockInput.pressKey("\t");
+    frame = await ui.frame();
+    expect(frame).toContain("wt-dash › all projects");
+    expect(frame).toContain("api");
+    expect(frame).toContain("web");
   } finally {
     await ui.stop();
   }
@@ -571,27 +633,49 @@ test("a narrow header drops the project and worktree counts before the total siz
   }
 });
 
-test("the projects table waits for the first scan to list every repo", async () => {
-  const web = row("web", 3000, {
-    repoName: "beta",
-    repoPath: "/repos/beta",
-    path: "/repos/beta/web",
+for (const [width, layout] of [
+  [90, "table"],
+  [130, "sidebar"],
+] as const) {
+  test(`the projects ${layout} shows projects once their worktrees are counted, before they are listed`, async () => {
+    const ui = await start(width, 20, [], undefined, "scanning");
+    const progress = (reposTotal: number, reposDone: number) => ({
+      ...ui.fake.service.getSnapshot().progress,
+      phase: "scanning" as const,
+      reposTotal,
+      reposDone,
+    });
+    try {
+      ui.fake.update({ progress: progress(0, 0) });
+      let frame = await ui.frame();
+      expect(frame).toContain("Finding repositories…");
+      expect(frame).not.toContain("enter open");
+      expect(frame).not.toContain("→ worktrees");
+      ui.fake.update({
+        repos: [
+          { path: "/repos/alpha", linked: 2 },
+          { path: "/repos/beta", linked: 1 },
+        ],
+        progress: progress(2, 0),
+      });
+      frame = await ui.frame();
+      expect(focused(frame)).toContain("alpha");
+      expect(frame).toContain("beta");
+      if (layout === "sidebar") expect(withoutSidebar(frame)).toContain("Listing worktrees…");
+      else expect(focused(frame)).toMatch(/alpha\s+2\s+…/);
+      ui.fake.update({
+        rows: [row("api", 2000), row("docs", 500, { verdict: "Review", mainState: "ahead" })],
+        progress: progress(2, 1),
+      });
+      frame = await ui.frame();
+      if (layout === "sidebar") expect(withoutSidebar(frame)).toContain("api");
+      else expect(focused(frame)).toMatch(/alpha\s+2\s+1\s+1/);
+      expect(frame).toContain("beta");
+    } finally {
+      await ui.stop();
+    }
   });
-  const ui = await start(100, 16, [], undefined, "scanning");
-  try {
-    ui.fake.setRows([row("api", 2000), web], "scanning");
-    let frame = await ui.frame();
-    expect(frame).toContain("Scanning repositories");
-    expect(frame).not.toContain("alpha");
-    ui.fake.setRows([row("api", 2000), web], "complete");
-    frame = await ui.frame();
-    expect(frame).not.toContain("Scanning repositories");
-    expect(frame).toContain("alpha");
-    expect(frame).toContain("beta");
-  } finally {
-    await ui.stop();
-  }
-});
+}
 
 function lineOf(frame: string, text: string): number {
   return frame.split("\n").findIndex((line) => line.includes(text));
@@ -667,7 +751,7 @@ test("messages use the status line and leave the key hints in place", async () =
   }
 });
 
-test("the projects screen describes the focused project beside the table", async () => {
+test("the sidebar describes the focused project under the projects", async () => {
   const ui = await start(140, 20, [
     row("api", 2000, { tool: "Codex" }),
     row("docs", 500, {
@@ -686,11 +770,14 @@ test("the projects screen describes the focused project beside the table", async
   ]);
   try {
     const frame = await ui.frame();
-    expect(frame).toContain("│ alpha  ~/alpha");
-    expect(frame).toContain("SAFE TO FREE  2.0 MB of 2.4 MB");
-    expect(frame).toContain("UNCOMMITTED   1 worktree");
-    expect(frame).toContain("MADE BY       Claude Code 1 · Codex 1");
-    expect(frame).toContain("LARGEST       api · 2.0 MB");
+    const card = frame.split("\n").map((line) => line.slice(0, line.indexOf(" │ ")).trimEnd());
+    expect(card).toContain("  alpha");
+    expect(card).toContain("  ~/alpha");
+    expect(card).toContain("  2.0 MB safe of 2.4 MB");
+    expect(card).toContain("  1 worktree uncommitted");
+    expect(card).toContain("  Claude Code 1 · Codex 1");
+    expect(card).toContain("  largest 2.0 MB · api");
+    expect(withoutSidebar(frame)).not.toContain("SAFE TO FREE");
   } finally {
     await ui.stop();
   }
