@@ -1,6 +1,6 @@
 # wt-dash
 
-See every Git worktree on your Mac in one terminal dashboard, find the ones you can safely delete, and remove them in bulk.
+See every Git worktree on your Mac or Linux machine in one terminal dashboard, find the ones you can safely delete, and remove them in bulk.
 
 Coding agents create worktrees constantly. Claude Code keeps them in `.claude/worktrees`, Codex in `~/.codex/worktrees`, and other tools elsewhere. Each one carries its own `node_modules`, and nothing cleans them up. A few weeks of agent work can leave dozens of worktrees and many gigabytes behind.
 
@@ -14,11 +14,29 @@ It is built on [Worktrunk](https://worktrunk.dev/): Worktrunk computes the Git f
 brew install rigomart/tap/wt-dash
 ```
 
-This installs Worktrunk too. wt-dash needs macOS 13 (Ventura) or newer, Git, and Worktrunk 0.80.0 or newer. It runs on Apple Silicon and Intel Macs.
+This installs Worktrunk too. wt-dash needs Git and Worktrunk 0.80.0 or newer, and runs on:
 
-On Macs where Homebrew has no prebuilt Worktrunk, including all Intel Macs, Homebrew compiles it from source. That takes a few minutes.
+- macOS 13 (Ventura) or newer, on Apple Silicon and Intel Macs
+- Linux with glibc, on arm64 and x64. Alpine and other musl-based distributions are not supported.
 
-Archives for direct download are attached to each [GitHub release](https://github.com/rigomart/wt-dash/releases). The binary is not signed or notarized, so macOS blocks a copy downloaded with a browser until you allow it under System Settings → Privacy & Security. Homebrew installs avoid this.
+Where Homebrew has no prebuilt Worktrunk, including all Intel Macs and Linux, Homebrew compiles it from source. That takes a few minutes. Run `ldd --version` to check a Linux system: glibc reports "GNU libc" on its first line.
+
+Archives for direct download are attached to each [GitHub release](https://github.com/rigomart/wt-dash/releases). Each holds the `wt-dash` executable; put it in a folder on your PATH. The macOS binary is not signed or notarized, so macOS blocks a copy downloaded with a browser until you allow it under System Settings → Privacy & Security. Homebrew installs avoid this.
+
+### Linux without Homebrew
+
+1. Install Worktrunk with `cargo install worktrunk`, with `sudo pacman -S worktrunk` on Arch Linux, or from a [Worktrunk release](https://github.com/max-sixty/worktrunk/releases).
+2. Download the archive for your processor from the [latest release](https://github.com/rigomart/wt-dash/releases/latest): `linux-x64` if `uname -m` prints `x86_64`, `linux-arm64` if it prints `aarch64`.
+3. Extract it and put `wt-dash` on your PATH, then check the setup:
+
+```sh
+tar -xzf wt-dash-v*-linux-x64.tar.gz
+mkdir -p ~/.local/bin
+mv wt-dash ~/.local/bin/
+wt-dash --doctor ~/projects
+```
+
+If your shell cannot find `wt-dash`, add `~/.local/bin` to your PATH.
 
 ## Usage
 

@@ -9,7 +9,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-test("generates a Homebrew formula from both release archives and the supplied repository", async () => {
+test("generates a Homebrew formula from the four release archives and the supplied repository", async () => {
   const root = await mkdtemp(join(tmpdir(), "dash-formula-"));
   roots.push(root);
   await mkdir(join(root, "scripts"));
@@ -19,8 +19,9 @@ test("generates a Homebrew formula from both release archives and the supplied r
     join(root, "scripts/homebrew.ts"),
   );
   await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.1.0" }));
-  await writeFile(join(root, "dist/wt-dash-v0.1.0-darwin-arm64.tar.gz"), "arm release");
-  await writeFile(join(root, "dist/wt-dash-v0.1.0-darwin-x64.tar.gz"), "intel release");
+  const platforms = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
+  for (const platform of platforms)
+    await writeFile(join(root, `dist/wt-dash-v0.1.0-${platform}.tar.gz`), `${platform} release`);
   const child = Bun.spawn(
     [process.execPath, join(root, "scripts/homebrew.ts"), "example/wt-dash"],
     { stdout: "pipe", stderr: "pipe" },
@@ -29,16 +30,14 @@ test("generates a Homebrew formula from both release archives and the supplied r
   expect({ code: await child.exited, error }).toEqual({ code: 0, error: "" });
   const formula = await readFile(join(root, "dist/wt-dash.rb"), "utf8");
   expect(formula).toContain('depends_on "worktrunk"');
-  expect(formula).toContain(
-    'on_arm do\n      url "https://github.com/example/wt-dash/releases/download/v0.1.0/wt-dash-v0.1.0-darwin-arm64.tar.gz"\n      sha256 "' +
-      createHash("sha256").update("arm release").digest("hex") +
-      '"',
-  );
-  expect(formula).toContain(
-    'on_intel do\n      url "https://github.com/example/wt-dash/releases/download/v0.1.0/wt-dash-v0.1.0-darwin-x64.tar.gz"\n      sha256 "' +
-      createHash("sha256").update("intel release").digest("hex") +
-      '"',
-  );
+  for (const platform of platforms)
+    expect(formula).toContain(
+      `on_${platform.endsWith("arm64") ? "arm" : "intel"} do\n      url "https://github.com/example/wt-dash/releases/download/v0.1.0/wt-dash-v0.1.0-${platform}.tar.gz"\n      sha256 "` +
+        createHash("sha256").update(`${platform} release`).digest("hex") +
+        '"',
+    );
+  expect(formula.indexOf("darwin-arm64")).toBeLessThan(formula.indexOf("on_linux do"));
+  expect(formula.indexOf("on_linux do")).toBeLessThan(formula.indexOf("linux-arm64"));
   const ruby = Bun.spawn(["ruby", "-c", join(root, "dist/wt-dash.rb")], {
     stdout: "pipe",
     stderr: "pipe",

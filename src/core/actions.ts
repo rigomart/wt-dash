@@ -1,6 +1,7 @@
 import { assess } from "./assess";
 import { readComparisonBase } from "./base";
 import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseWorktrunk } from "./worktrunk";
 import type { CommandRunner, WorktreeFacts, WorktreeRow } from "./types";
@@ -188,6 +189,8 @@ function failure(name: string, result: { exitCode: number; stderr: string }): Er
     `${name} exited ${result.exitCode}: ${result.stderr.trim() || "no error details"}`,
   );
 }
+/** macOS keeps user data on the APFS data volume, not the root volume. */
+const dataVolume = process.platform === "darwin" ? "/System/Volumes/Data" : homedir();
 function availableKiB(stdout: string): number | null {
   const line = stdout.trim().split("\n")[1];
   if (!line) return null;
@@ -283,7 +286,7 @@ export function createActionService(options: {
   }
   async function diskSpace(): Promise<number | null> {
     try {
-      const result = await options.runner("df", ["-k", "/System/Volumes/Data"]);
+      const result = await options.runner("df", ["-k", dataVolume]);
       return result.exitCode === 0 ? availableKiB(result.stdout) : null;
     } catch {
       return null;

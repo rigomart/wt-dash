@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import metadata from "../package.json";
 
 export const version = metadata.version;
-export const help = `wt-dash ${version} — inspect and clean up Git worktrees on macOS
+export const help = `wt-dash ${version} — inspect and clean up Git worktrees on macOS and Linux
 
 Usage: wt-dash [options] [folder ...]
 
