@@ -1,9 +1,16 @@
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { CliOptions } from "./cli";
 import { runCommand } from "./core/process";
 
 const minimumWorktrunk = [0, 80, 0];
+const platformNames: Record<string, string> = { darwin: "macOS", linux: "Linux" };
+
+export function platformName(platform: string = process.platform): string | undefined {
+  return platformNames[platform];
+}
 
 async function executable(path: string): Promise<boolean> {
   try {
@@ -17,8 +24,8 @@ export async function prepareStartup(
   options: CliOptions,
   environment: { platform?: string; path?: string } = {},
 ) {
-  if ((environment.platform ?? process.platform) !== "darwin")
-    throw new Error("This release supports macOS only.");
+  const platform = environment.platform ?? process.platform;
+  if (!platformName(platform)) throw new Error("This release supports macOS and Linux only.");
   const roots: string[] = [];
   for (const root of options.roots) {
     try {
@@ -36,13 +43,19 @@ export async function prepareStartup(
   const gitPath = Bun.which("git", { PATH: path });
   if (!gitPath)
     throw new Error(
-      "Git was not found on PATH. Install Apple's command line tools: xcode-select --install",
+      platform === "darwin"
+        ? "Git was not found on PATH. Install Apple's command line tools: xcode-select --install"
+        : "Git was not found on PATH. Install it with your distribution's package manager.",
     );
   const candidates = options.wtPath
     ? [options.wtPath]
-    : [Bun.which("wt", { PATH: path }), "/opt/homebrew/bin/wt", "/usr/local/bin/wt"].filter(
-        (candidate): candidate is string => candidate !== null,
-      );
+    : [
+        Bun.which("wt", { PATH: path }),
+        "/opt/homebrew/bin/wt",
+        "/usr/local/bin/wt",
+        "/home/linuxbrew/.linuxbrew/bin/wt",
+        join(homedir(), ".cargo/bin/wt"),
+      ].filter((candidate): candidate is string => candidate !== null);
   let wtPath: string | undefined;
   for (const candidate of candidates) {
     if (await executable(candidate)) {
@@ -52,7 +65,7 @@ export async function prepareStartup(
   }
   if (!wtPath)
     throw new Error(
-      "Worktrunk was not found. Install it with: brew install worktrunk\nOr supply its executable with --wt-path /path/to/wt",
+      "Worktrunk was not found. Install it with: brew install worktrunk, or cargo install worktrunk\nOr supply its executable with --wt-path /path/to/wt",
     );
 
   async function readVersion(command: string, name: string): Promise<string> {

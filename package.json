@@ -1,10 +1,11 @@
 {
   "name": "wt-dash",
   "version": "0.1.0",
-  "description": "A macOS terminal dashboard for reviewing and cleaning up Git worktrees across repositories.",
+  "description": "A macOS and Linux terminal dashboard for reviewing and cleaning up Git worktrees across repositories.",
   "license": "MIT",
   "os": [
-    "darwin"
+    "darwin",
+    "linux"
   ],
   "cpu": [
     "arm64",

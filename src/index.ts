@@ -2,7 +2,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { help, parseArgs, version } from "./cli";
-import { prepareStartup } from "./startup";
+import { platformName, prepareStartup } from "./startup";
 import { createDashboardService } from "./core/dashboard";
 import { createActionService } from "./core/actions";
 import { runCommand } from "./core/process";
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const ready = await prepareStartup(options);
   if (options.mode === "doctor") {
     console.log(
-      `wt-dash ${version}\nPlatform: macOS ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\nScan folders:\n${ready.roots.map((root) => `  ${root}`).join("\n")}\nSearch depth: ${options.depth}\nSetup checks passed.`,
+      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\nScan folders:\n${ready.roots.map((root) => `  ${root}`).join("\n")}\nSearch depth: ${options.depth}\nSetup checks passed.`,
     );
     return;
   }

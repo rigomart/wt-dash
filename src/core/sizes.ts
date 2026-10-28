@@ -4,6 +4,8 @@ import type { CommandRunner, SizeEntry, SizeService, SizeSignature } from "./typ
 
 /** A saved size older than this is measured again even when its folders look unchanged. */
 export const SIZE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** Apple's du on macOS, where a GNU du from Homebrew may come first on PATH. */
+const du = process.platform === "darwin" ? "/usr/bin/du" : "du";
 
 async function readSignature(path: string): Promise<SizeSignature | null> {
   try {
@@ -106,7 +108,7 @@ export function createSizeService(
       // Stat before du, so a change made while du runs is caught next time.
       const signature = await readSignature(path);
       if (closed) return null;
-      const result = await runner("/usr/bin/du", ["-sk", path], abort.signal);
+      const result = await runner(du, ["-sk", path], abort.signal);
       if (result.exitCode !== 0) return null;
       const match = /^(\d+)\s/.exec(result.stdout);
       if (!match) return null;

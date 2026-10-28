@@ -32,7 +32,7 @@ test("help and version run successfully without Git or Worktrunk", async () => {
 test("missing Git exits with installation guidance and no stack trace", async () => {
   const result = await run(["--doctor", "."]);
   expect(result.code).toBe(1);
-  expect(result.stderr).toContain("xcode-select --install");
+  expect(result.stderr).toContain("Git was not found on PATH. Install");
   expect(result.stderr).not.toContain("at main");
   expect(result.stdout).toBe("");
 });

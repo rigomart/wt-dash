@@ -8,13 +8,16 @@ if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository))
   throw new Error("Supply the GitHub repository: bun run formula owner/wt-dash");
 const directory = resolve(import.meta.dir, "../dist");
 const hashes: Record<string, string> = {};
-for (const arch of ["arm64", "x64"]) {
+for (const platform of ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]) {
   const archive = await readFile(
-    join(directory, `wt-dash-v${metadata.version}-darwin-${arch}.tar.gz`),
+    join(directory, `wt-dash-v${metadata.version}-${platform}.tar.gz`),
   );
-  hashes[arch] = createHash("sha256").update(archive).digest("hex");
+  hashes[platform] = createHash("sha256").update(archive).digest("hex");
 }
 const base = `https://github.com/${repository}`;
+const download = (platform: string) =>
+  `url "${base}/releases/download/v${metadata.version}/wt-dash-v${metadata.version}-${platform}.tar.gz"
+      sha256 "${hashes[platform]}"`;
 const formula = `class WtDash < Formula
   desc "Review and clean up Git worktrees across repositories"
   homepage "${base}"
@@ -23,16 +26,24 @@ const formula = `class WtDash < Formula
 
   on_macos do
     on_arm do
-      url "${base}/releases/download/v${metadata.version}/wt-dash-v${metadata.version}-darwin-arm64.tar.gz"
-      sha256 "${hashes.arm64}"
+      ${download("darwin-arm64")}
     end
     on_intel do
-      url "${base}/releases/download/v${metadata.version}/wt-dash-v${metadata.version}-darwin-x64.tar.gz"
-      sha256 "${hashes.x64}"
+      ${download("darwin-x64")}
+    end
+
+    depends_on macos: :ventura
+  end
+
+  on_linux do
+    on_arm do
+      ${download("linux-arm64")}
+    end
+    on_intel do
+      ${download("linux-x64")}
     end
   end
 
-  depends_on macos: :ventura
   depends_on "worktrunk"
 
   def install

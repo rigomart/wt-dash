@@ -74,6 +74,19 @@ test("missing scan folders and unsupported platforms produce useful errors", asy
     }),
   ).rejects.toThrow("Scan folder");
   await expect(
+    prepareStartup(parseArgs([root], root, root), { platform: "win32", path: bin }),
+  ).rejects.toThrow("macOS and Linux");
+});
+
+test("runs on Linux and suggests a package manager when Git is missing", async () => {
+  const { root, bin } = await environment();
+  const ready = await prepareStartup(parseArgs([root], root, root), {
+    platform: "linux",
+    path: bin,
+  });
+  expect(ready.wtPath).toBe(join(bin, "wt"));
+  await rm(join(bin, "git"));
+  await expect(
     prepareStartup(parseArgs([root], root, root), { platform: "linux", path: bin }),
-  ).rejects.toThrow("macOS");
+  ).rejects.toThrow("package manager");
 });

@@ -1,10 +1,13 @@
 #!/bin/sh
 set -eu
 
-if [ "$(uname -s)" != Darwin ]; then
-  echo "wt-dash supports macOS only." >&2
-  exit 1
-fi
+case "$(uname -s)" in
+  Darwin | Linux) ;;
+  *)
+    echo "wt-dash supports macOS and Linux only." >&2
+    exit 1
+    ;;
+esac
 if [ "$#" -gt 1 ]; then
   echo "Usage: sh scripts/install.sh [path/to/wt-dash]" >&2
   exit 1

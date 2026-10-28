@@ -11,11 +11,12 @@ if (Bun.version !== runtimeVersion) {
     `Release builds use Bun ${runtimeVersion} so the bundled runtime and license notices match. Run: bunx bun@${runtimeVersion} run build`,
   );
 }
-if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) {
+if (!["darwin", "linux"].includes(process.platform) || !["arm64", "x64"].includes(process.arch)) {
   throw new Error(
-    "Build on an Apple Silicon or Intel Mac. Each release architecture is built on its own Mac.",
+    "Build on macOS or Linux, on arm64 or x64. Each release platform and architecture is built on its own machine.",
   );
 }
+const platform = `${process.platform}-${process.arch}`;
 if (
   process.env.GITHUB_REF_TYPE === "tag" &&
   process.env.GITHUB_REF_NAME !== `v${metadata.version}`
@@ -26,7 +27,7 @@ await mkdir(output, { recursive: true });
 const result = await Bun.build({
   entrypoints: [join(root, "src/index.ts")],
   compile: {
-    target: process.arch === "arm64" ? "bun-darwin-arm64" : "bun-darwin-x64",
+    target: `bun-${platform}` as Bun.Build.CompileTarget,
     outfile: join(output, "wt-dash"),
     autoloadDotenv: false,
     autoloadBunfig: false,
@@ -70,7 +71,7 @@ for (const dependency of Object.keys(metadata.dependencies)) await collect(depen
 await writeFile(join(output, "THIRD_PARTY_NOTICES.txt"), notices.join("\n"));
 for (const file of ["LICENSE", "README.md"]) await copyFile(join(root, file), join(output, file));
 
-const archive = `wt-dash-v${metadata.version}-darwin-${process.arch}.tar.gz`;
+const archive = `wt-dash-v${metadata.version}-${platform}.tar.gz`;
 const tar = Bun.spawn(
   [
     "/usr/bin/tar",
