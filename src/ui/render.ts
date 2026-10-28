@@ -31,20 +31,25 @@ import {
   type Style,
 } from "./line";
 import {
+  ALL_PROJECTS,
   TABS,
   VERDICTS,
   inJob,
   isGrouped,
   jobStatus,
+  listScreen,
   listView,
+  projectsReady,
   projectsView,
   scopedRows,
   visibleRows,
+  worktreeCount,
   type Confirm,
   type ListView,
   type Project,
   type ProjectsView,
   type RunStatus,
+  type Screen,
   type Section,
   type Tab,
   type Toast,
@@ -74,14 +79,20 @@ export function render(state: UiState, ctx: RenderContext, viewport: Viewport): 
   const width = Math.max(20, ctx.width);
   const height = Math.max(8, ctx.height);
   const sized = { ...ctx, width, height };
-  const screen = state.screen;
+  const screen = listScreen(state, ctx.snapshot);
   const scope = screen.kind === "project" ? `project:${screen.repoPath}` : screen.kind;
   if (viewport.listScope !== scope) {
     viewport.listScope = scope;
     viewport.listTop = 0;
   }
-  const body =
-    screen.kind === "projects"
+  const onProjects = state.screen.kind === "projects";
+  const showsScanProgress = onProjects && !projectsReady(state, ctx.snapshot);
+  const sidebar =
+    width >= SIDEBAR_MIN_WIDTH &&
+    (showsScanProgress || projectsView(state, ctx.snapshot).projects.length > 1);
+  const body = sidebar
+    ? renderSidebar(state, sized, viewport)
+    : onProjects
       ? renderProjects(state, sized, viewport)
       : renderList(state, sized, viewport);
   const lines = pad(body, height).map((line) => fitLine(line, width));
@@ -100,8 +111,10 @@ const CHROME_LINES = [
 
 const bodyHeightFor = (height: number) => Math.max(1, height - CHROME_LINES);
 
-function sidePanelWidth(width: number): number {
-  return width >= 110 ? Math.max(40, Math.min(56, Math.floor(width * 0.36))) : 0;
+const SIDEBAR_MIN_WIDTH = 100;
+
+function sidebarWidth(width: number): number {
+  return Math.max(28, Math.min(34, Math.floor(width * 0.22)));
 }
 
 function bottomPanelHeight(bodyHeight: number): number {
@@ -110,9 +123,9 @@ function bottomPanelHeight(bodyHeight: number): number {
 }
 
 /** Rows the list shows at once; used for page up/down. */
-export function listPageSize(width: number, height: number): number {
+export function listPageSize(height: number): number {
   const body = bodyHeightFor(height);
-  return Math.max(1, body - (sidePanelWidth(width) ? 0 : bottomPanelHeight(body)) - 1);
+  return Math.max(1, body - bottomPanelHeight(body) - 1);
 }
 
 interface Body {
@@ -124,23 +137,9 @@ function withDetails(
   ctx: RenderContext,
   height: number,
   list: (ctx: RenderContext, height: number) => Body,
-  details: (width: number, height: number) => Line[],
+  details: (width: number) => Line[],
 ): Body {
   const { width } = ctx;
-  const side = sidePanelWidth(width);
-  if (side) {
-    const listWidth = width - side;
-    const result = list({ ...ctx, width: listWidth }, height);
-    const panel = pad(details(side - 3, height), height);
-    return {
-      lines: pad(result.lines, height).map((line, index) => [
-        ...fitLine(line, listWidth),
-        seg(" │ ", { dim: true }),
-        ...fitLine(panel[index]!, side - 3),
-      ]),
-      below: result.below,
-    };
-  }
   const strip = bottomPanelHeight(height);
   if (!strip) return list(ctx, height);
   const listHeight = height - strip;
@@ -149,7 +148,7 @@ function withDetails(
     lines: [
       ...pad(result.lines, listHeight),
       rule(width, result.below ? `↓ ${result.below} more` : "", { dim: true }),
-      ...pad(details(width - 2, strip - 1), strip - 1).map((line) => [seg("  "), ...line]),
+      ...pad(details(width - 2), strip - 1).map((line) => [seg("  "), ...line]),
     ],
     below: 0,
   };
@@ -203,38 +202,208 @@ function selectedKiB(state: UiState, snapshot: DashboardSnapshot): number {
 function renderList(state: UiState, ctx: RenderContext, viewport: Viewport): Line[] {
   const { width } = ctx;
   const view = listView(state, ctx.snapshot);
-  const top: Line[] = [
-    headerLine(state, ctx),
-    tabsLine(state, view, ctx),
-    meterLine(scopedRows(state, ctx.snapshot), ctx),
-  ];
   const bodyHeight = bodyHeightFor(ctx.height);
-  let body: Line[];
-  let below = 0;
-  if (state.expanded) {
-    const lines = detailLines(view.focus, state, ctx, width, true);
-    const scroll = Math.max(0, Math.min(state.detailTop, lines.length - bodyHeight));
-    body = lines.slice(scroll, scroll + bodyHeight);
-    below = Math.max(0, lines.length - scroll - bodyHeight);
-  } else {
-    ({ lines: body, below } = withDetails(
-      ctx,
-      bodyHeight,
-      (listCtx, height) => sectionLines(state, view, listCtx, height, viewport),
-      (panelWidth, height) =>
-        sidePanelWidth(width)
-          ? worktreeDetails(view.focus, state, ctx, panelWidth, height)
-          : worktreeSummary(view.focus, state, ctx, panelWidth),
-    ));
-  }
-  const bottom = rule(width, below ? `↓ ${below} more` : "", { dim: true });
+  const { lines, below } = listColumn(state, view, ctx, bodyHeight, viewport, true);
   return [
-    ...top,
-    ...pad(body, bodyHeight),
-    bottom,
+    headerLine(state, ctx, state.screen, scopedRows(state, ctx.snapshot)),
+    ...lines,
+    rule(width, below ? `↓ ${below} more` : "", { dim: true }),
     statusLine(state, ctx),
-    listFooter(state, ctx, view.focus),
+    listFooter(state, ctx, view.focus, false),
   ];
+}
+
+function listColumn(
+  state: UiState,
+  view: ListView,
+  ctx: RenderContext,
+  bodyHeight: number,
+  viewport: Viewport,
+  details: boolean,
+): Body {
+  const top: Line[] = [tabsLine(state, view, ctx), meterLine(scopedRows(state, ctx.snapshot), ctx)];
+  if (state.expanded) {
+    const lines = detailLines(view.focus, state, ctx, ctx.width, true);
+    const scroll = Math.max(0, Math.min(state.detailTop, lines.length - bodyHeight));
+    return {
+      lines: [...top, ...pad(lines.slice(scroll, scroll + bodyHeight), bodyHeight)],
+      below: Math.max(0, lines.length - scroll - bodyHeight),
+    };
+  }
+  const list = (listCtx: RenderContext, height: number) =>
+    sectionLines(state, view, listCtx, height, viewport);
+  const { lines, below } = details
+    ? withDetails(ctx, bodyHeight, list, (panelWidth) =>
+        worktreeSummary(view.focus, state, ctx, panelWidth),
+      )
+    : list(ctx, bodyHeight);
+  return { lines: [...top, ...pad(lines, bodyHeight)], below };
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+
+function renderSidebar(state: UiState, ctx: RenderContext, viewport: Viewport): Line[] {
+  const { width, snapshot } = ctx;
+  const projects = projectsView(state, snapshot);
+  const view = listView(state, snapshot);
+  const scope = listScreen(state, snapshot);
+  const side = sidebarWidth(width);
+  const listCtx = { ...ctx, width: width - side - 3 };
+  const bodyHeight = bodyHeightFor(ctx.height);
+  const onProjects = state.screen.kind === "projects";
+  const waiting = onProjects && !projectsReady(state, snapshot);
+  const detailsStrip = !onProjects;
+  const list = waiting
+    ? { lines: [[], meterLine([], listCtx)], below: 0 }
+    : listColumn(state, view, listCtx, bodyHeight, viewport, detailsStrip);
+  const sidebar = sidebarLines(state, projects, { ...ctx, width: side }, bodyHeight + 2, viewport);
+  return [
+    waiting
+      ? headerLine(state, ctx, state.screen, [])
+      : headerLine(
+          state,
+          ctx,
+          scope,
+          scopedRows(state, snapshot),
+          scope.kind === "all" ? projects.projects.length : undefined,
+        ),
+    ...sidebar.map((line, index) => [
+      ...fitLine(line, side),
+      seg(" │ ", { dim: true }),
+      ...fitLine(list.lines[index] ?? [], listCtx.width),
+    ]),
+    rule(width, list.below ? `↓ ${list.below} more` : "", { dim: true }),
+    statusLine(state, ctx),
+    listFooter(state, ctx, view.focus, true),
+  ];
+}
+
+function sidebarLines(
+  state: UiState,
+  view: ProjectsView,
+  ctx: RenderContext,
+  height: number,
+  viewport: Viewport,
+): Line[] {
+  const { width, theme } = ctx;
+  const active = state.screen.kind === "projects";
+  const title: Line = [
+    cell("  PROJECTS", width - SIDEBAR_FREE.width, { dim: true }),
+    cell(SIDEBAR_FREE.title, SIDEBAR_FREE.width, { dim: true }, "right"),
+  ];
+  if (!projectsReady(state, ctx.snapshot) && active)
+    return pad([title, ...scanProgress(state, ctx)], height);
+  const lines = view.entries.map((project) => {
+    const focused = project === view.focus;
+    const count = String(worktreeCount(project) || (project.pending ? "…" : 0));
+    const selected = project.rows.filter((row) => state.selected.has(row.id)).length;
+    const mark = selected ? ` ■${selected}` : "";
+    const nameWidth = Math.max(
+      1,
+      width - 2 - SIDEBAR_FREE.width - textWidth(count) - textWidth(mark) - 1,
+    );
+    const name = middle(project.repoName, nameWidth);
+    const parts: Line = [
+      focused ? seg("▌ ", { fg: theme.accent, dim: !active }) : seg("  "),
+      seg(name, { bold: focused }),
+      dim(` ${count}`),
+      seg(mark, { fg: theme.safe }),
+    ];
+    parts.push(seg(" ".repeat(Math.max(0, width - SIDEBAR_FREE.width - lineWidth(parts)))));
+    parts.push(
+      project.error && !project.rows.length
+        ? cell("! failed", SIDEBAR_FREE.width, { fg: theme.review }, "right")
+        : SIDEBAR_FREE.cell(project, ctx),
+    );
+    return fitLine(parts, width, focused && active ? { bg: theme.focusBg } : undefined);
+  });
+  const card =
+    lines.length + 1 + SIDEBAR_CARD_LINES <= height - 1
+      ? [[], ...projectCard(state, view, ctx, width - 2).map((line) => [seg("  "), ...line])]
+      : [];
+  const rows = height - 1 - card.length;
+  const focus = view.focus ? view.entries.indexOf(view.focus) : 0;
+  let top = viewport.projectsTop;
+  if (focus < top) top = focus;
+  if (focus >= top + rows) top = focus - rows + 1;
+  top = Math.max(0, Math.min(top, lines.length - rows));
+  viewport.projectsTop = top;
+  return pad([title, ...lines.slice(top, top + rows), ...card], height);
+}
+
+const SIDEBAR_CARD_LINES = 7;
+
+function projectCard(
+  state: UiState,
+  view: ProjectsView,
+  ctx: RenderContext,
+  width: number,
+): Line[] {
+  const { theme, now, home, snapshot } = ctx;
+  const project = view.focus;
+  if (!project) return [];
+  const all = project.repoPath === ALL_PROJECTS;
+  const lines: Line[] = [
+    [seg(clip(project.repoName, width), { bold: true })],
+    [
+      dim(
+        all
+          ? countLabel(view.projects.length, "project")
+          : middle(homePath(project.repoPath, home), width),
+      ),
+    ],
+  ];
+  if (project.error)
+    return [
+      ...lines,
+      ...wrap(`Scan failed: ${project.error}`, width)
+        .slice(0, SIDEBAR_CARD_LINES - lines.length)
+        .map((text) => [seg(text, { fg: theme.review })]),
+    ];
+  const rows = project.rows;
+  if (!rows.length) {
+    const listing = project.pending || (all && snapshot.progress.phase === "scanning");
+    return [
+      ...lines,
+      listing
+        ? [seg(spinner(state), { fg: theme.accent }), dim(" listing worktrees…")]
+        : [dim("No worktrees")],
+    ];
+  }
+  const dirty = rows.filter((row) => row.changes && changesLabel(row) !== "clean").length;
+  const tools = (Object.keys(TOOL_NAMES) as ToolName[])
+    .map((tool) => [tool, rows.filter((row) => row.tool === tool).length] as const)
+    .filter(([, count]) => count)
+    .sort((a, b) => b[1] - a[1]);
+  const time = (row: WorktreeRow) => Date.parse(row.committedAt ?? "");
+  const oldest = rows
+    .filter((row) => Number.isFinite(time(row)))
+    .reduce<WorktreeRow | null>(
+      (best, row) => (!best || time(row) < time(best) ? row : best),
+      null,
+    );
+  const largest = rows.reduce<WorktreeRow | null>(
+    (best, row) => ((row.sizeKiB ?? -1) > (best?.sizeKiB ?? -1) ? row : best),
+    null,
+  );
+  const named = (label: string, value: string, row: WorktreeRow): Line => {
+    const room = Math.max(1, width - label.length - value.length - 3);
+    return [dim(label), seg(value), dim(" · "), dim(middle(branchLabel(row), room))];
+  };
+  lines.push(
+    [
+      seg(`${sizeLabel(project.safeKiB)} safe`, { fg: theme.safe }),
+      dim(clip(` of ${sizeLabel(project.totalKiB)}`, width)),
+    ],
+    dirty
+      ? [seg(`${countLabel(dirty, "worktree")} uncommitted`, { fg: theme.review })]
+      : [seg("nothing uncommitted", { fg: theme.safe })],
+    [dim(clip(tools.map(([tool, count]) => `${TOOL_NAMES[tool]} ${count}`).join(" · "), width))],
+  );
+  if (oldest) lines.push(named("oldest  ", agoLabel(oldest.committedAt, now), oldest));
+  if (largest && largest.sizeKiB !== null)
+    lines.push(named("largest ", sizeLabel(largest.sizeKiB), largest));
+  return lines.map((line) => fitLine(line, width));
 }
 
 function statusLine(state: UiState, ctx: RenderContext): Line {
@@ -261,10 +430,15 @@ const SUMMARY_PARTS_BY_WIDTH: SummaryPart[][] = [
   [],
 ];
 
-function headerLine(state: UiState, ctx: RenderContext, projects?: number): Line {
+function headerLine(
+  state: UiState,
+  ctx: RenderContext,
+  screen: Screen,
+  rows: WorktreeRow[],
+  projects?: number,
+): Line {
   const { snapshot, theme } = ctx;
   const progress = snapshot.progress;
-  const rows = scopedRows(state, snapshot);
   const total = rows.reduce((sum, row) => sum + (row.sizeKiB ?? 0), 0);
   const unknown = rows.filter((row) => row.sizeKiB === null).length;
   const status: Line =
@@ -278,7 +452,6 @@ function headerLine(state: UiState, ctx: RenderContext, projects?: number): Line
         : progress.phase === "complete"
           ? [dim(`scanned ${clockLabel(progress.completedAt)}  `), key(theme, "r"), dim(" rescan")]
           : [dim("starting…")];
-  const screen = state.screen;
   const place =
     screen.kind === "project"
       ? (rows[0]?.repoName ?? screen.repoPath.split("/").at(-1) ?? screen.repoPath)
@@ -294,7 +467,11 @@ function headerLine(state: UiState, ctx: RenderContext, projects?: number): Line
     sizing: unknown ? `${unknown} sizing` : "",
   };
   const summary = (names: SummaryPart[]): Line => {
-    const shown = state.scanned ? names.map((name) => parts[name]).filter(Boolean) : [];
+    const listing = !rows.length && progress.phase === "scanning";
+    const shown =
+      projectsReady(state, snapshot) && !listing
+        ? names.map((name) => parts[name]).filter(Boolean)
+        : [];
     return [dim(shown.map((part) => `${part} · `).join("")), ...status];
   };
   const right =
@@ -513,6 +690,18 @@ function removalStatus(state: UiState, id: string, theme: Theme): RowStatus | nu
 
 function emptyMessage(state: UiState, ctx: RenderContext): Line {
   const { snapshot } = ctx;
+  const screen = listScreen(state, snapshot);
+  const listing =
+    snapshot.progress.phase === "scanning" &&
+    (screen.kind === "project"
+      ? !snapshot.errors[screen.repoPath] &&
+        !snapshot.rows.some((row) => row.repoPath === screen.repoPath)
+      : !snapshot.rows.length);
+  if (listing)
+    return [
+      seg(spinner(state), { fg: ctx.theme.accent }),
+      seg(screen.kind === "project" ? " Listing worktrees…" : " Scanning repositories…"),
+    ];
   if (!snapshot.rows.length) {
     return snapshot.progress.phase === "scanning" || snapshot.progress.phase === "idle"
       ? [seg(spinner(state), { fg: ctx.theme.accent }), seg(" Scanning repositories…")]
@@ -536,7 +725,11 @@ function sectionLines(
   viewport: Viewport,
 ): { lines: Line[]; below: number } {
   if (!view.rows.length) return { lines: [[], emptyMessage(state, ctx)], below: 0 };
-  const cols = columns(ctx.width, isGrouped(state), state.screen.kind === "all");
+  const cols = columns(
+    ctx.width,
+    isGrouped(state, ctx.snapshot),
+    listScreen(state, ctx.snapshot).kind === "all",
+  );
   const lines: Line[] = [];
   const isRow: boolean[] = [];
   const push = (line: Line, row = false) => {
@@ -572,18 +765,6 @@ const TOOL_NAMES: Record<ToolName, string> = {
   t3: "t3",
   Other: "other",
 };
-
-function worktreeDetails(
-  row: WorktreeRow | null,
-  state: UiState,
-  ctx: RenderContext,
-  width: number,
-  height: number,
-): Line[] {
-  const lines = detailLines(row, state, ctx, width, false);
-  if (lines.length <= height) return lines;
-  return [...lines.slice(0, height - 1), keyHints(ctx.theme, [["i", "show everything"]])];
-}
 
 const SUMMARY_FILE_LINES = 2;
 
@@ -820,7 +1001,12 @@ function progressLine(state: UiState, ctx: RenderContext): Line {
   return spread(left, right, width);
 }
 
-function listFooter(state: UiState, ctx: RenderContext, focus: WorktreeRow | null): Line {
+function listFooter(
+  state: UiState,
+  ctx: RenderContext,
+  focus: WorktreeRow | null,
+  sidebar: boolean,
+): Line {
   const { theme, width } = ctx;
   let left: Line;
   if (state.confirm)
@@ -852,11 +1038,12 @@ function listFooter(state: UiState, ctx: RenderContext, focus: WorktreeRow | nul
         ["esc", "clear"],
       ]),
     ];
+  } else if (state.screen.kind === "projects" && !projectsReady(state, ctx.snapshot)) {
+    left = [];
   } else if (state.screen.kind === "projects") {
     left = keyHints(theme, [
-      ["enter", "open"],
+      [sidebar ? "→" : "enter", sidebar ? "worktrees" : "open"],
       ...(ctx.canAct ? [["a", "select safe"] as [string, string]] : []),
-      ["*", "all projects"],
       ["/", "search"],
     ]);
   } else {
@@ -873,7 +1060,7 @@ function listFooter(state: UiState, ctx: RenderContext, focus: WorktreeRow | nul
         ? [["v", state.grouped ? "by verdict" : "by repo"] as [string, string]]
         : []),
       ["s", `sort: ${state.sort} ${state.descending ? "↓" : "↑"}`],
-      ["esc", "projects"],
+      ["←", "projects"],
     ];
     left = keyHints(theme, ctx.canAct ? [...action, ["a", "all safe"], ...view] : view);
   }
@@ -909,8 +1096,8 @@ function sizeColumn(
   title: string,
   kib: (project: Project) => number,
   rowsCovered: (project: Project) => number,
+  width = 11,
 ): ProjectColumn {
-  const width = 11;
   return {
     title,
     width,
@@ -935,6 +1122,12 @@ const SAFE_SIZE_COLUMN = sizeColumn(
   "SAFE SIZE",
   (project) => project.safeKiB,
   (project) => project.counts.Safe,
+);
+const SIDEBAR_FREE = sizeColumn(
+  "FREE",
+  (project) => project.safeKiB,
+  (project) => project.counts.Safe,
+  9,
 );
 const TOTAL_COLUMN = sizeColumn(
   "TOTAL",
@@ -988,6 +1181,30 @@ function projectLine(
   return fitLine(parts, width, focused ? { bg: theme.focusBg } : undefined);
 }
 
+function scanProgress(state: UiState, ctx: RenderContext): Line[] {
+  const { snapshot, theme } = ctx;
+  const { reposDone, reposTotal } = snapshot.progress;
+  const label = ctx.width >= 40 ? "Scanning repositories" : "Scanning";
+  const lines: Line[] = [
+    [],
+    [
+      seg("  "),
+      seg(spinner(state), { fg: theme.accent }),
+      seg(reposTotal ? ` ${label} · ${reposDone} of ${reposTotal}` : " Finding repositories…"),
+    ],
+  ];
+  const barWidth = Math.min(40, ctx.width - 4);
+  if (reposTotal && barWidth >= 10) {
+    const filled = Math.round((reposDone / reposTotal) * barWidth);
+    lines.push([
+      seg("  "),
+      seg("━".repeat(filled), { fg: theme.accent }),
+      dim("━".repeat(barWidth - filled)),
+    ]);
+  }
+  return lines;
+}
+
 function projectsBody(
   state: UiState,
   view: ProjectsView,
@@ -995,39 +1212,14 @@ function projectsBody(
   height: number,
   viewport: Viewport,
 ): { lines: Line[]; below: number } {
-  const { snapshot, theme } = ctx;
-  if (!state.scanned) {
-    const { reposDone, reposTotal } = snapshot.progress;
-    const lines: Line[] = [
-      [],
-      [
-        seg("  "),
-        seg(spinner(state), { fg: theme.accent }),
-        seg(
-          reposTotal
-            ? ` Scanning repositories · ${reposDone} of ${reposTotal}`
-            : " Finding repositories…",
-        ),
-      ],
-    ];
-    const barWidth = Math.min(40, ctx.width - 4);
-    if (reposTotal && barWidth >= 10) {
-      const filled = Math.round((reposDone / reposTotal) * barWidth);
-      lines.push([
-        seg("  "),
-        seg("━".repeat(filled), { fg: theme.accent }),
-        dim("━".repeat(barWidth - filled)),
-      ]);
-    }
-    return { lines, below: 0 };
-  }
+  if (!projectsReady(state, ctx.snapshot)) return { lines: scanProgress(state, ctx), below: 0 };
   if (!view.projects.length) return { lines: [[], [dim("  No worktrees found.")]], below: 0 };
   const cols = projectColumns(ctx.width);
-  const lines = view.projects.map((project) =>
+  const lines = view.entries.map((project) =>
     projectLine(project, cols, state, ctx, project === view.focus),
   );
   if (view.empty) lines.push([], [dim(`  ${countLabel(view.empty, "project")} with no worktrees`)]);
-  const focus = view.focus ? view.projects.indexOf(view.focus) : 0;
+  const focus = view.focus ? view.entries.indexOf(view.focus) : 0;
   let top = viewport.projectsTop;
   if (focus < top) top = focus;
   if (focus >= top + height) top = focus - height + 1;
@@ -1035,20 +1227,20 @@ function projectsBody(
   viewport.projectsTop = top;
   return {
     lines: lines.slice(top, top + height),
-    below: Math.max(0, view.projects.length - top - height),
+    below: Math.max(0, view.entries.length - top - height),
   };
 }
 
 function renderProjects(state: UiState, ctx: RenderContext, viewport: Viewport): Line[] {
   const { width } = ctx;
   const view = projectsView(state, ctx.snapshot);
-  const tableWidth = width - sidePanelWidth(width);
-  const cols = projectColumns(tableWidth);
+  const cols = projectColumns(width);
+  const rows = visibleRows(state, ctx.snapshot);
   const top: Line[] = [
-    headerLine(state, ctx, view.projects.length),
-    meterLine(state.scanned ? visibleRows(state, ctx.snapshot) : [], ctx),
+    headerLine(state, ctx, state.screen, rows, view.projects.length),
+    meterLine(projectsReady(state, ctx.snapshot) ? rows : [], ctx),
     [
-      cell("  PROJECT", tableWidth - cols.reduce((sum, col) => sum + col.width, 0), { dim: true }),
+      cell("  PROJECT", width - cols.reduce((sum, col) => sum + col.width, 0), { dim: true }),
       ...cols.map((col) => cell(col.title, col.width, { dim: true }, "right")),
     ],
   ];
@@ -1057,7 +1249,8 @@ function renderProjects(state: UiState, ctx: RenderContext, viewport: Viewport):
     ctx,
     bodyHeight,
     (tableCtx, height) => projectsBody(state, view, tableCtx, height, viewport),
-    (panelWidth) => (state.scanned ? projectDetails(view.focus, ctx, panelWidth) : []),
+    (panelWidth) =>
+      projectsReady(state, ctx.snapshot) ? projectDetails(view, ctx, panelWidth) : [],
   );
   const bottom = rule(width, below ? `↓ ${below} more` : "", { dim: true });
   return [
@@ -1065,19 +1258,22 @@ function renderProjects(state: UiState, ctx: RenderContext, viewport: Viewport):
     ...pad(lines, bodyHeight),
     bottom,
     statusLine(state, ctx),
-    listFooter(state, ctx, null),
+    listFooter(state, ctx, null, false),
   ];
 }
 
-function projectDetails(project: Project | null, ctx: RenderContext, width: number): Line[] {
+function projectDetails(view: ProjectsView, ctx: RenderContext, width: number): Line[] {
   const { theme, now, home } = ctx;
+  const project = view.focus;
   if (!project) return [];
+  const where =
+    project.repoPath === ALL_PROJECTS
+      ? countLabel(view.projects.length, "project")
+      : homePath(project.repoPath, home);
   const lines: Line[] = [
     [
       seg(project.repoName, { bold: true }),
-      dim(
-        `  ${middle(homePath(project.repoPath, home), Math.max(1, width - textWidth(project.repoName) - 2))}`,
-      ),
+      dim(`  ${middle(where, Math.max(1, width - textWidth(project.repoName) - 2))}`),
     ],
   ];
   if (project.error)
@@ -1088,7 +1284,8 @@ function projectDetails(project: Project | null, ctx: RenderContext, width: numb
       ]),
     ];
   const rows = project.rows;
-  if (!rows.length) return [...lines, [dim(project.pending ? "Scanning…" : "No worktrees")]];
+  if (!rows.length)
+    return [...lines, [dim(project.pending ? "Listing worktrees…" : "No worktrees")]];
   const tools = (Object.keys(TOOL_NAMES) as ToolName[])
     .map((tool) => [tool, rows.filter((row) => row.tool === tool).length] as const)
     .filter(([, count]) => count)
@@ -1315,16 +1512,16 @@ function helpGroups(_state: UiState): Array<[string, Array<[string, string]>]> {
     [
       "PROJECTS",
       [
-        ["enter", "open project"],
+        ["enter →", "open project or all"],
+        ["← esc", "back to projects"],
+        ["tab", "switch projects / list"],
         ["[ ]", "previous / next project"],
-        ["*", "all projects in one list"],
-        ["esc", "back to projects"],
       ],
     ],
     [
       "FIND",
       [
-        ["1-5 ← →", "verdict tab"],
+        ["1-5", "verdict tab"],
         ["/", "search as you type"],
         ["s S", "sort / reverse"],
         ["v", "group by repo or verdict"],

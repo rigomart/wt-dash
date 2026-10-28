@@ -69,8 +69,8 @@ export interface SizeService {
   load(): Promise<void>;
   get(path: string): SizeEntry | null;
   measure(path: string): Promise<SizeEntry | null>;
-  /** Measures only when the saved size is stale, joining a stale check already running for the path; resolves to null when it is still fresh or the measurement fails. */
-  measureIfStale(path: string): Promise<SizeEntry | null>;
+  /** Measures only when the saved size is stale, joining a stale check already running for the path; resolves to null when it is still fresh or the measurement fails. `first` puts it ahead of every measurement still waiting. */
+  measureIfStale(path: string, first?: boolean): Promise<SizeEntry | null>;
   close(): Promise<void>;
 }
 

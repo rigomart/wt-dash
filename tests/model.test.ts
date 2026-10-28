@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { RemovalEntry } from "../src/core/actions";
 import type { DashboardSnapshot, WorktreeRow } from "../src/core/types";
 import {
+  ALL_PROJECTS,
   CONFIRM_ARM_MS,
   initialState,
   listView,
@@ -83,7 +84,7 @@ function press(state: UiState, ctx: Context, ...keys: Array<string | Partial<Key
 
 function openedWorktreeList(ctx: Context): UiState {
   const state = update(initialState(), { type: "snapshot" }, ctx).state;
-  return state.screen.kind === "projects" ? press(state, ctx, "*") : state;
+  return state.screen.kind === "projects" ? press(state, ctx, "g", "return") : state;
 }
 
 function send(state: UiState, ctx: Context, event: UiEvent) {
@@ -486,6 +487,57 @@ test("a on the projects screen selects that project's Safe worktrees and x remov
     type: "prepareRemoval",
     rows: [{ id: "a" }, { id: "b" }],
   });
+});
+
+test("All projects comes first, previews every worktree, and a on it selects Safe ones in every project", () => {
+  const ctx = context([
+    row("a", 10),
+    row("b", 20, { verdict: "Review", mainState: "ahead" }),
+    beta("c", 30),
+  ]);
+  let state = send(initialState(), ctx, { type: "snapshot" }).state;
+  const view = projectsView(state, ctx.snapshot);
+  expect(view.entries.map((project) => project.repoName)).toEqual([
+    "All projects",
+    "alpha",
+    "beta",
+  ]);
+  expect(view.entries[0]).toMatchObject({ totalKiB: 60, safeKiB: 40 });
+  expect(view.focus?.repoName).toBe("alpha");
+  expect(
+    listView(state, ctx.snapshot)
+      .rows.map((item) => item.id)
+      .sort(),
+  ).toEqual(["a", "b"]);
+  expect(listView(state, ctx.snapshot).focus).toBeNull();
+  state = press(state, ctx, "k");
+  expect(state.projectFocus).toBe(ALL_PROJECTS);
+  expect(
+    listView(state, ctx.snapshot)
+      .rows.map((item) => item.id)
+      .sort(),
+  ).toEqual(["a", "b", "c"]);
+  state = press(state, ctx, "a");
+  expect([...state.selected].sort()).toEqual(["a", "c"]);
+  expect(state.toast?.text).toBe("Selected 2 Safe worktrees in every project · up to 40 KB");
+  state = press(state, ctx, { name: "return" });
+  expect(state.screen).toEqual({ kind: "all" });
+});
+
+test("left or tab in a list goes back to the projects, keeping the project it came from", () => {
+  const ctx = context([row("a", 10), beta("c", 30)]);
+  let state = send(initialState(), ctx, { type: "snapshot" }).state;
+  state = press(state, ctx, "j", { name: "right" }, "2");
+  expect(state.screen).toEqual({ kind: "project", repoPath: "/repos/beta" });
+  state = press(state, ctx, { name: "left" });
+  expect(state.screen).toEqual({ kind: "projects" });
+  expect(state.tab).toBe("Safe");
+  expect(projectsView(state, ctx.snapshot).focus?.repoName).toBe("beta");
+  state = press(state, ctx, "g", { name: "tab" });
+  expect(state.screen).toEqual({ kind: "all" });
+  state = press(state, ctx, { name: "tab" });
+  expect(state.screen).toEqual({ kind: "projects" });
+  expect(state.projectFocus).toBe(ALL_PROJECTS);
 });
 
 test("[ and ] step between projects, and / searches every project", () => {

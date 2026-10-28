@@ -1,6 +1,7 @@
 import { assess } from "./assess";
 import { readComparisonBase } from "./base";
-import { countLinkedWorktrees, discoverRepos } from "./discovery";
+import { basename } from "node:path";
+import { discoverRepos, readLinkedWorktrees, type LinkedWorktrees } from "./discovery";
 import { parseWorktrunk, SchemaMismatchError } from "./worktrunk";
 import type {
   CommandRunner,
@@ -16,7 +17,36 @@ interface DashboardOptions {
   runner: CommandRunner;
   sizeService: SizeService;
   discover?: (root: string, maxDepth: number) => Promise<string[]>;
-  countLinked?: (repo: string) => Promise<number | null>;
+  readLinked?: (repo: string) => Promise<LinkedWorktrees | null>;
+}
+
+/**
+ * Repos in the order the projects screen shows them: most worktrees first, with the repo whose worktrees
+ * took the most space at the last measurement moved up to second. `first` holds the repos listed first.
+ */
+export function listingOrder(
+  repos: Array<{ path: string; linked: LinkedWorktrees | null }>,
+  sizeOf: (path: string) => number | null,
+): { order: string[]; first: Set<string> } {
+  const ranked = [...repos].sort(
+    (a, b) =>
+      (b.linked?.count ?? 0) - (a.linked?.count ?? 0) ||
+      basename(a.path).localeCompare(basename(b.path)) ||
+      a.path.localeCompare(b.path),
+  );
+  const saved = (repo: (typeof repos)[number]) =>
+    (repo.linked?.paths ?? []).reduce((sum, path) => sum + (sizeOf(path) ?? 0), 0);
+  const heaviest = ranked.reduce<(typeof repos)[number] | null>(
+    (best, repo) => (saved(repo) > (best ? saved(best) : 0) ? repo : best),
+    null,
+  );
+  const promoted = heaviest !== null && heaviest !== ranked[0];
+  if (promoted) {
+    ranked.splice(ranked.indexOf(heaviest), 1);
+    ranked.splice(1, 0, heaviest);
+  }
+  const order = ranked.map((repo) => repo.path);
+  return { order, first: new Set(order.slice(0, promoted ? 2 : 1)) };
 }
 
 export function createDashboardService(options: DashboardOptions): DashboardService {
@@ -49,10 +79,10 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     });
   }
 
-  function scheduleSizes(rows: WorktreeRow[], scanGeneration: number): void {
+  function scheduleSizes(rows: WorktreeRow[], scanGeneration: number, first: boolean): void {
     for (const row of rows) {
       void options.sizeService
-        .measureIfStale(row.path)
+        .measureIfStale(row.path, first)
         .then(() => {
           const entry = options.sizeService.get(row.path);
           if (!entry || !current(scanGeneration)) return;
@@ -128,9 +158,13 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         return;
       }
       if (!current(scanGeneration)) return;
-      const counts = await Promise.all(repos.map(options.countLinked ?? countLinkedWorktrees));
+      const linked = await Promise.all(repos.map(options.readLinked ?? readLinkedWorktrees));
       if (!current(scanGeneration)) return;
-      const found = repos.map((path, index) => ({ path, linked: counts[index]! }));
+      const found = repos.map((path, index) => ({ path, linked: linked[index]?.count ?? null }));
+      const { order, first } = listingOrder(
+        repos.map((path, index) => ({ path, linked: linked[index]! })),
+        (path) => options.sizeService.get(path)?.sizeKiB ?? null,
+      );
       publish({
         ...snapshot,
         repos: targeted
@@ -142,8 +176,8 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       });
       let nextRepo = 0;
       async function worker(): Promise<void> {
-        while (nextRepo < repos.length && current(scanGeneration)) {
-          const repo = repos[nextRepo++]!;
+        while (nextRepo < order.length && current(scanGeneration)) {
+          const repo = order[nextRepo++]!;
           const controller = new AbortController();
           controllers.add(controller);
           try {
@@ -203,7 +237,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
                 ...snapshot,
                 rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows],
               });
-              scheduleSizes(rows, scanGeneration);
+              scheduleSizes(rows, scanGeneration, first.has(repo));
             }
           } catch (error) {
             if (!current(scanGeneration)) continue;

@@ -1,5 +1,5 @@
-import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export async function discoverRepos(root: string, maxDepth: number): Promise<string[]> {
   const repos: string[] = [];
@@ -39,12 +39,29 @@ export async function discoverRepos(root: string, maxDepth: number): Promise<str
   return repos.sort();
 }
 
-/** Count the linked worktrees Git records in `.git/worktrees`, without running Git. */
-export async function countLinkedWorktrees(repo: string): Promise<number | null> {
+export interface LinkedWorktrees {
+  count: number;
+  /** Folders of the worktrees whose `gitdir` record could be read. */
+  paths: string[];
+}
+
+/** Read the linked worktrees Git records in `.git/worktrees`, without running Git. */
+export async function readLinkedWorktrees(repo: string): Promise<LinkedWorktrees | null> {
+  const records = join(repo, ".git", "worktrees");
+  let names: string[];
   try {
-    const entries = await readdir(join(repo, ".git", "worktrees"), { withFileTypes: true });
-    return entries.filter((entry) => entry.isDirectory()).length;
+    const entries = await readdir(records, { withFileTypes: true });
+    names = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? 0 : null;
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? { count: 0, paths: [] } : null;
   }
+  const paths = await Promise.all(
+    names.map((name) =>
+      readFile(join(records, name, "gitdir"), "utf8").then(
+        (gitdir) => dirname(gitdir.trim()),
+        () => null,
+      ),
+    ),
+  );
+  return { count: names.length, paths: paths.filter((path) => path !== null) };
 }

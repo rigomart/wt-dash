@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { countLinkedWorktrees, discoverRepos } from "../src/core/discovery";
+import { discoverRepos, readLinkedWorktrees } from "../src/core/discovery";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -38,12 +38,16 @@ test("does not scan repositories inside installed dependencies or build output",
   expect(await discoverRepos(root, 3)).toEqual([join(root, "real")]);
 });
 
-test("counts linked worktrees from Git's records without running Git", async () => {
+test("reads linked worktrees and their folders from Git's records without running Git", async () => {
   const root = await mkdtemp(join(tmpdir(), "dash-discover-"));
   roots.push(root);
   await mkdir(join(root, "busy", ".git", "worktrees", "one"), { recursive: true });
   await mkdir(join(root, "busy", ".git", "worktrees", "two"), { recursive: true });
+  await writeFile(join(root, "busy", ".git", "worktrees", "one", "gitdir"), "/trees/one/.git\n");
   await mkdir(join(root, "quiet", ".git"), { recursive: true });
-  expect(await countLinkedWorktrees(join(root, "busy"))).toBe(2);
-  expect(await countLinkedWorktrees(join(root, "quiet"))).toBe(0);
+  expect(await readLinkedWorktrees(join(root, "busy"))).toEqual({
+    count: 2,
+    paths: ["/trees/one"],
+  });
+  expect(await readLinkedWorktrees(join(root, "quiet"))).toEqual({ count: 0, paths: [] });
 });

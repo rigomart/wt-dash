@@ -20,6 +20,8 @@ const DESCENDING_BY_DEFAULT: Record<SortKey, boolean> = { size: true, age: true,
 export const VERDICTS: Verdict[] = ["Safe", "Review", "Busy", "Broken"];
 
 export type Screen = { kind: "projects" } | { kind: "project"; repoPath: string } | { kind: "all" };
+/** The `projectFocus` of the "All projects" entry. */
+export const ALL_PROJECTS = "*";
 
 export type Tone = "info" | "ok" | "warn" | "error";
 export interface Toast {
@@ -210,6 +212,8 @@ export interface Project {
 
 export interface ProjectsView {
   projects: Project[];
+  /** "All projects" followed by every project, in the order focus moves through them. */
+  entries: Project[];
   empty: number;
   focus: Project | null;
 }
@@ -221,6 +225,25 @@ function projectPaths(snapshot: DashboardSnapshot): string[] {
   return [...paths];
 }
 
+function summarize(
+  repoPath: string,
+  name: string,
+  rows: WorktreeRow[],
+  rest: Pick<Project, "linked" | "pending" | "error">,
+): Project {
+  const counts: Record<Verdict, number> = { Safe: 0, Review: 0, Busy: 0, Broken: 0 };
+  let totalKiB = 0;
+  let safeKiB = 0;
+  let unsized = 0;
+  for (const row of rows) {
+    counts[row.verdict]++;
+    if (row.sizeKiB === null) unsized++;
+    totalKiB += row.sizeKiB ?? 0;
+    if (row.verdict === "Safe") safeKiB += row.sizeKiB ?? 0;
+  }
+  return { repoPath, repoName: name, rows, counts, totalKiB, safeKiB, unsized, ...rest };
+}
+
 export function projectsView(state: UiState, snapshot: DashboardSnapshot): ProjectsView {
   const linked = new Map(snapshot.repos.map((repo) => [repo.path, repo.linked]));
   const listed = new Set(snapshot.rows.map((row) => row.repoPath));
@@ -228,29 +251,12 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
   const projects = projectPaths(snapshot)
     .map((repoPath): Project => {
       const own = rows.filter((row) => row.repoPath === repoPath);
-      const counts: Record<Verdict, number> = { Safe: 0, Review: 0, Busy: 0, Broken: 0 };
-      let totalKiB = 0;
-      let safeKiB = 0;
-      let unsized = 0;
-      for (const row of own) {
-        counts[row.verdict]++;
-        if (row.sizeKiB === null) unsized++;
-        totalKiB += row.sizeKiB ?? 0;
-        if (row.verdict === "Safe") safeKiB += row.sizeKiB ?? 0;
-      }
       const error = snapshot.errors[repoPath] ?? null;
-      return {
-        repoPath,
-        repoName: own[0]?.repoName ?? repoName(repoPath),
-        rows: own,
-        counts,
-        totalKiB,
-        safeKiB,
-        unsized,
+      return summarize(repoPath, own[0]?.repoName ?? repoName(repoPath), own, {
         linked: linked.get(repoPath) ?? null,
         pending: !listed.has(repoPath) && !error && snapshot.progress.phase === "scanning",
         error,
-      };
+      });
     })
     .sort(
       (a, b) =>
@@ -259,11 +265,18 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
         a.repoPath.localeCompare(b.repoPath),
     );
   const shown = new Set(projects.map((project) => project.repoPath));
+  const all = summarize(ALL_PROJECTS, "All projects", rows, {
+    linked: projects.reduce((sum, project) => sum + worktreeCount(project), 0),
+    pending: projects.some((project) => project.pending),
+    error: null,
+  });
+  const entries = projects.length ? [all, ...projects] : [];
   return {
     projects,
+    entries,
     empty: snapshot.repos.filter((repo) => !shown.has(repo.path)).length,
     focus:
-      projects.find((project) => project.repoPath === state.projectFocus) ?? projects[0] ?? null,
+      entries.find((project) => project.repoPath === state.projectFocus) ?? projects[0] ?? null,
   };
 }
 
@@ -290,14 +303,23 @@ function leaving(state: UiState, id: string): boolean {
   return status === "waiting" || status === "removing" || status === "removed";
 }
 
+/** What the worktree list shows: the open screen, or a preview of the focused project. */
+export function listScreen(state: UiState, snapshot: DashboardSnapshot): Screen {
+  if (state.screen.kind !== "projects") return state.screen;
+  const focus = projectsView(state, snapshot).focus;
+  return !focus || focus.repoPath === ALL_PROJECTS
+    ? { kind: "all" }
+    : { kind: "project", repoPath: focus.repoPath };
+}
+
 export function scopedRows(state: UiState, snapshot: DashboardSnapshot): WorktreeRow[] {
   const rows = visibleRows(state, snapshot);
-  const screen = state.screen;
+  const screen = listScreen(state, snapshot);
   return screen.kind === "project" ? rows.filter((row) => row.repoPath === screen.repoPath) : rows;
 }
 
-export function isGrouped(state: UiState): boolean {
-  return state.grouped && state.screen.kind === "all";
+export function isGrouped(state: UiState, snapshot: DashboardSnapshot): boolean {
+  return state.grouped && listScreen(state, snapshot).kind === "all";
 }
 
 export function listView(state: UiState, snapshot: DashboardSnapshot): ListView {
@@ -320,7 +342,7 @@ export function listView(state: UiState, snapshot: DashboardSnapshot): ListView 
   const filtered =
     state.tab === "All" ? matching : matching.filter((row) => tabOf(row.verdict) === state.tab);
   const rank = (row: WorktreeRow) => VERDICTS.indexOf(row.verdict);
-  const sections: Section[] = isGrouped(state)
+  const sections: Section[] = isGrouped(state, snapshot)
     ? groupByRepo(filtered).map((group) => ({
         kind: "repo",
         ...group,
@@ -345,6 +367,11 @@ export function jobStatus(state: UiState, id: string): RunStatus | undefined {
 
 export function inJob(state: UiState, id: string): boolean {
   return jobStatus(state, id) !== undefined;
+}
+
+/** True once the first scan has counted every repo's worktrees. */
+export function projectsReady(state: UiState, snapshot: DashboardSnapshot): boolean {
+  return state.scanned || snapshot.progress.reposTotal > 0;
 }
 
 export function spinning(state: UiState, snapshot: DashboardSnapshot): boolean {
@@ -579,7 +606,12 @@ function openScreen(state: UiState, screen: Screen): UiState {
   return {
     ...state,
     screen,
-    projectFocus: screen.kind === "project" ? screen.repoPath : state.projectFocus,
+    projectFocus:
+      screen.kind === "project"
+        ? screen.repoPath
+        : screen.kind === "all"
+          ? ALL_PROJECTS
+          : state.projectFocus,
     focusId: null,
     moved: false,
     expanded: false,
@@ -591,16 +623,16 @@ function onProjectsKey(state: UiState, key: Key, ctx: Context): Result {
   const view = projectsView(state, ctx.snapshot);
   const focus = view.focus;
   const moveTo = (target: number | "first" | "last"): UiState => {
-    if (!view.projects.length) return state;
-    const index = Math.max(0, view.projects.indexOf(focus!));
-    const last = view.projects.length - 1;
+    if (!view.entries.length) return state;
+    const index = Math.max(0, view.entries.indexOf(focus!));
+    const last = view.entries.length - 1;
     const next =
       target === "first"
         ? 0
         : target === "last"
           ? last
           : Math.max(0, Math.min(last, index + target));
-    return { ...state, projectFocus: view.projects[next]!.repoPath };
+    return { ...state, projectFocus: view.entries[next]!.repoPath };
   };
   if (key.char === "q") return quitRequest(state, ctx);
   if (key.char === "?") return same({ ...state, help: true });
@@ -610,14 +642,23 @@ function onProjectsKey(state: UiState, key: Key, ctx: Context): Result {
   if (key.name === "pagedown") return same(moveTo(Math.max(1, ctx.pageSize - 1)));
   if (key.name === "home" || key.char === "g") return same(moveTo("first"));
   if (key.name === "end" || key.char === "G") return same(moveTo("last"));
-  if (isEnter(key) || key.name === "right" || key.char === "l") {
+  if (isEnter(key) || key.name === "right" || key.char === "l" || key.name === "tab") {
     if (!focus) return same(state);
-    return same(openScreen(state, { kind: "project", repoPath: focus.repoPath }));
+    return same(
+      openScreen(
+        state,
+        focus.repoPath === ALL_PROJECTS
+          ? { kind: "all" }
+          : { kind: "project", repoPath: focus.repoPath },
+      ),
+    );
   }
-  if (key.char === "*") return same(openScreen(state, { kind: "all" }));
   if (key.char === "/") return same({ ...openScreen(state, { kind: "all" }), searching: true });
-  if (key.char === "a")
-    return same(focus ? selectAllSafe(state, focus.rows, ctx, focus.repoName) : state);
+  if (key.char === "a") {
+    if (!focus) return same(state);
+    const where = focus.repoPath === ALL_PROJECTS ? "every project" : focus.repoName;
+    return same(selectAllSafe(state, focus.rows, ctx, where));
+  }
   if (key.char === "x") {
     if (!state.selected.size)
       return same(
@@ -788,13 +829,8 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
   if (key.name === "home" || key.char === "g") return same(move(state, view, "first"));
   if (key.name === "end" || key.char === "G") return same(move(state, view, "last"));
   if (/^[1-5]$/.test(key.char)) return same({ ...state, tab: TABS[Number(key.char) - 1]! });
-  if (key.name === "left" || key.char === "h" || key.name === "right" || key.char === "l") {
-    const step = key.name === "left" || key.char === "h" ? -1 : 1;
-    return same({
-      ...state,
-      tab: TABS[(TABS.indexOf(state.tab) + step + TABS.length) % TABS.length]!,
-    });
-  }
+  if (key.name === "left" || key.char === "h" || key.name === "tab")
+    return same(openScreen(state, { kind: "projects" }));
   if (key.char === "s") {
     const sort = SORT_KEYS[(SORT_KEYS.indexOf(state.sort) + 1) % SORT_KEYS.length]!;
     return same({ ...state, sort, descending: DESCENDING_BY_DEFAULT[sort] });
