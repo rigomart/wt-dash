@@ -23,6 +23,7 @@ function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}):
     branch: id,
     headSha: "abcdef1",
     committedAt: "2026-09-28T00:00:00Z",
+    createdAt: "2026-09-27T00:00:00Z",
     tool: "Claude",
     changes: {
       staged: false,

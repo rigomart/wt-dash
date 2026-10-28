@@ -60,15 +60,15 @@ wt-dash looks for repositories up to two folder levels below each folder you giv
 
 Every worktree gets one of four verdicts. The list groups them into sections, and each row shows its Git status and the reason behind it.
 
-| Verdict    | Status                                                                                  | Removal                            |
-| ---------- | --------------------------------------------------------------------------------------- | ---------------------------------- |
-| **Safe**   | no new commits, merged                                                                  | Allowed                            |
-| **Review** | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history | Allowed after you read the warning |
-| **Review** | locked, status unknown                                                                  | Blocked                            |
-| **Busy**   | rebase, merge, or cherry-pick in progress; unresolved conflicts                         | Blocked                            |
-| **Broken** | folder missing                                                                          | Offers to prune Git's record       |
+| Verdict    | Status                                                                                                                   | Removal                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| **Safe**   | no new commits, merged                                                                                                   | Allowed                            |
+| **Review** | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history; no new commits, under a day old | Allowed after you read the warning |
+| **Review** | locked, status unknown                                                                                                   | Blocked                            |
+| **Busy**   | rebase, merge, or cherry-pick in progress; unresolved conflicts                                                          | Blocked                            |
+| **Broken** | folder missing                                                                                                           | Offers to prune Git's record       |
 
-**Safe** means Worktrunk reports clean content already integrated into, or identical to, the default branch. wt-dash does not check pull request status or running processes. A lock always blocks removal, however old; unlock it yourself with `git worktree unlock` if it is stale.
+**Safe** means Worktrunk reports clean content already integrated into, or identical to, the default branch. A branch with nothing beyond the default branch, either the same commit or one the default branch has since moved past, looks that way the moment its worktree is created. So, like `wt step prune`, wt-dash calls such a worktree Safe only once it is a day old. Until then it is Review, with a reason such as "Created 2h ago, so it may still be in use", and `a` leaves it out. Its age comes from when Git created its folder under `.git/worktrees`; if that can't be read, it stays Review. A branch whose own commits reached the default branch through a squash or rebase merge is Safe at any age. wt-dash does not check pull request status or running processes. A lock always blocks removal, however old; unlock it yourself with `git worktree unlock` if it is stale.
 
 A blocked row says what to do next, for example "finish or abort the rebase first".
 
@@ -116,7 +116,7 @@ Enter opens one confirmation dialog. It lists each worktree and its size, the to
 - **Branches are kept** unless they are merged. Press `D` in the dialog to delete unmerged branches too.
 - **Processes are left alone** unless you press `e`, which asks Worktrunk to stop processes running inside.
 - **Ignored files go with the worktree.** That includes `.env` copies, local databases, and caches, the same way Worktrunk treats them.
-- **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, or a rebase or merge is in progress, it is skipped and comes back with a note. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
+- **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, it was created again at the same path, or a rebase or merge is in progress, it is skipped and comes back with a note. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
 - **Worktrunk hooks are skipped.** Project-defined cleanup commands do not run.
 
 Removals run in the background, and you can queue more while one is going. Each attempt is logged to `~/.cache/wt-dash/removals.log`.

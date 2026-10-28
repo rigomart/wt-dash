@@ -12,6 +12,7 @@ function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
     branch: "b",
     headSha: "abc",
     committedAt: null,
+    createdAt: null,
     tool: "Claude",
     changes: {
       staged: false,

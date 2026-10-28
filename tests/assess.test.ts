@@ -1,10 +1,14 @@
 import { expect, test } from "bun:test";
-import { assess } from "../src/core/assess";
+import { assess, MIN_AGE_MS } from "../src/core/assess";
 import { parseWorktrunk } from "../src/core/worktrunk";
 import fixture from "./fixtures/list-v2.json";
 import type { WorktreeFacts } from "../src/core/types";
 
-const base = { ...parseWorktrunk("/repo", JSON.stringify(fixture))[0]!, mainBase: "origin/main" };
+const base = {
+  ...parseWorktrunk("/repo", JSON.stringify(fixture))[0]!,
+  mainBase: "origin/main",
+  createdAt: "2026-09-27T00:00:00Z",
+};
 const assessment = (update: Partial<WorktreeFacts> = {}) => assess({ ...base, ...update });
 
 test.each([
@@ -27,6 +31,7 @@ test.each([
   [{ mainState: "empty" }, "no new commits", "Safe", false],
   [{ mainState: "same_commit" }, "no new commits", "Safe", false],
   [{ mainState: "integrated", integrationReason: "same_commit" }, "no new commits", "Safe", false],
+  [{ mainState: "integrated", integrationReason: "ancestor" }, "merged", "Safe", false],
   [{ mainState: null }, "status unknown", "Review", true],
   [{ mainState: "unexpected" }, "status unknown", "Review", true],
   [{ path: "relative" }, "status unknown", "Review", true],
@@ -35,6 +40,55 @@ test.each([
   expect(result.status).toBe(status);
   expect(result.verdict).toBe(verdict);
   expect(result.removalBlockReason !== null).toBe(blocked);
+});
+
+const now = Date.parse("2026-10-28T12:00:00Z");
+const createdBefore = (ms: number) => new Date(now - ms).toISOString();
+const noNewCommits: Partial<WorktreeFacts>[] = [
+  { mainState: "empty", integrationReason: "same_commit" },
+  { mainState: "same_commit" },
+  { mainState: "integrated", integrationReason: "same_commit" },
+  { mainState: "integrated", integrationReason: "ancestor" },
+];
+
+test.each(noNewCommits)(
+  "a worktree with no new commits created under a day ago needs review: %j",
+  (update) => {
+    const result = assess({ ...base, ...update, createdAt: createdBefore(2 * 3_600_000) }, now);
+    expect(result.verdict).toBe("Review");
+    expect(result.reason).toBe("Created 2h ago, so it may still be in use.");
+    expect(result.removalBlockReason).toBeNull();
+  },
+);
+
+test.each(noNewCommits)("a worktree with no new commits is Safe once a day old: %j", (update) => {
+  const result = assess({ ...base, ...update, createdAt: createdBefore(MIN_AGE_MS) }, now);
+  expect(result.verdict).toBe("Safe");
+  expect(result.reason).toContain("origin/main");
+});
+
+test.each(noNewCommits)(
+  "a worktree with no new commits and an unknown creation time needs review: %j",
+  (update) => {
+    const result = assess({ ...base, ...update, createdAt: null }, now);
+    expect(result.verdict).toBe("Review");
+    expect(result.reason).toBe("Its creation time is unknown, so it may still be in use.");
+    expect(result.removalBlockReason).toBeNull();
+  },
+);
+
+test("the creation age reads in minutes, and a clock that runs behind reads as just now", () => {
+  const young = (ms: number) =>
+    assess({ ...base, mainState: "empty", createdAt: createdBefore(ms) }, now).reason;
+  expect(young(5 * 60_000)).toBe("Created 5m ago, so it may still be in use.");
+  expect(young(-60_000)).toBe("Created just now, so it may still be in use.");
+});
+
+test("a young worktree whose own commits were squash-merged stays Safe", () => {
+  for (const createdAt of [createdBefore(60_000), null]) {
+    const result = assess({ ...base, integrationReason: "patch_id_match", createdAt }, now);
+    expect(result.verdict).toBe("Safe");
+  }
 });
 
 test("a lock outranks cleanup warnings and preserves Git's complete reason", () => {

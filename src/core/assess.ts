@@ -24,8 +24,18 @@ function commitsArent(count: number | null): string {
   return count === 1 ? "1 commit isn't" : `${count} commits aren't`;
 }
 
+/** Worktrunk's default `wt step prune --min-age`. */
+export const MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** "just now", "4m ago", or "3h ago". */
+function createdAgo(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return "just now";
+  return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`;
+}
+
 /** One authority for Git status, verdict, explanation, and removal eligibility. */
-export function assess(facts: WorktreeFacts): Assessment {
+export function assess(facts: WorktreeFacts, now = Date.now()): Assessment {
   const result = (
     status: string,
     verdict: Verdict,
@@ -110,19 +120,30 @@ export function assess(facts: WorktreeFacts): Assessment {
   if (facts.upstreamAhead !== null && facts.upstreamAhead > 0) {
     return result("unpushed commits", "Review", `${commitsArent(facts.upstreamAhead)} pushed.`);
   }
+  // A worktree just created from the base has no commits beyond it, so it looks merged before any work starts.
+  const safeOnceDayOld = (status: string, reason: string): Assessment => {
+    const age = facts.createdAt ? now - Date.parse(facts.createdAt) : NaN;
+    if (Number.isNaN(age))
+      return result(status, "Review", "Its creation time is unknown, so it may still be in use.");
+    if (age < MIN_AGE_MS)
+      return result(status, "Review", `Created ${createdAgo(age)}, so it may still be in use.`);
+    return result(status, "Safe", reason);
+  };
   switch (state) {
     case "integrated": {
       if (facts.integrationReason === "same_commit")
-        return result("no new commits", "Safe", `Same commit as ${base}.`);
+        return safeOnceDayOld("no new commits", `Same commit as ${base}.`);
+      if (facts.integrationReason === "ancestor")
+        return safeOnceDayOld("merged", integrationDetails.ancestor!(base));
       const detail = facts.integrationReason
         ? integrationDetails[facts.integrationReason]
         : undefined;
       return result("merged", "Safe", detail ? detail(base) : `Its content is already in ${base}.`);
     }
     case "same_commit":
-      return result("no new commits", "Safe", `Same commit as ${base}.`);
+      return safeOnceDayOld("no new commits", `Same commit as ${base}.`);
     case "empty":
-      return result("no new commits", "Safe", `No commits beyond ${base}.`);
+      return safeOnceDayOld("no new commits", `No commits beyond ${base}.`);
     case "ahead":
       return result("unmerged commits", "Review", `${commitsArent(facts.mainAhead)} in ${base}.`);
     case "would_conflict":

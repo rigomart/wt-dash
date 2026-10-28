@@ -18,6 +18,7 @@ const clean: WorktreeFacts = {
   branch: "feature",
   headSha: "abc",
   committedAt: "2026-09-28T00:00:00Z",
+  createdAt: "2026-09-27T00:00:00Z",
   tool: "Other",
   changes: cleanChanges,
   upstreamAhead: 0,

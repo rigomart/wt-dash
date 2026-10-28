@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverRepos, readLinkedWorktrees } from "../src/core/discovery";
+import { discoverRepos, readCreatedAt, readLinkedWorktrees } from "../src/core/discovery";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -50,4 +50,37 @@ test("reads linked worktrees and their folders from Git's records without runnin
     paths: ["/trees/one"],
   });
   expect(await readLinkedWorktrees(join(root, "quiet"))).toEqual({ count: 0, paths: [] });
+});
+
+test("a worktree's creation time is its Git folder's birth time, which later Git writes leave alone", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dash-discover-"));
+  roots.push(root);
+  const admin = join(root, "repo", ".git", "worktrees", "one");
+  const before = Date.now();
+  await mkdir(admin, { recursive: true });
+  const after = Date.now();
+  await mkdir(join(root, "absolute"));
+  await writeFile(join(root, "absolute", ".git"), `gitdir: ${admin}\n`);
+  await mkdir(join(root, "relative"));
+  await writeFile(join(root, "relative", ".git"), "gitdir: ../repo/.git/worktrees/one\n");
+  await Bun.sleep(20);
+  await writeFile(join(admin, "HEAD"), "ref: refs/heads/one\n");
+
+  const created = Date.parse((await readCreatedAt(join(root, "absolute")))!);
+  // File birth times can trail Date.now() by up to a millisecond.
+  expect(created).toBeGreaterThanOrEqual(before - 1);
+  expect(created).toBeLessThanOrEqual(after);
+  expect(await readCreatedAt(join(root, "relative"))).toBe(new Date(created).toISOString());
+});
+
+test("a worktree's creation time is unknown without a readable .git file and Git folder", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dash-discover-"));
+  roots.push(root);
+  await mkdir(join(root, "no-link"));
+  await mkdir(join(root, "dangling"));
+  await writeFile(join(root, "dangling", ".git"), `gitdir: ${join(root, "gone")}\n`);
+  await mkdir(join(root, "garbled"));
+  await writeFile(join(root, "garbled", ".git"), "not a gitdir line\n");
+  for (const name of ["no-link", "dangling", "garbled", "missing"])
+    expect(await readCreatedAt(join(root, name))).toBeNull();
 });

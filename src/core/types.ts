@@ -18,6 +18,8 @@ export interface WorktreeFacts {
   branch: string | null;
   headSha: string | null;
   committedAt: string | null;
+  /** When Git created the worktree, or null when it could not be read. */
+  createdAt: string | null;
   tool: ToolName;
   changes: ChangeFlags | null;
   upstreamAhead: number | null;

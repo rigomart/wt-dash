@@ -11,6 +11,7 @@ function row(id: string, update: Partial<WorktreeRow> = {}): WorktreeRow {
     branch: id,
     headSha: id,
     committedAt: "2026-09-28T00:00:00Z",
+    createdAt: "2026-09-27T00:00:00Z",
     tool: "Claude",
     changes: {
       staged: false,
