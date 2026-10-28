@@ -1,5 +1,5 @@
-import { readdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 export async function discoverRepos(root: string, maxDepth: number): Promise<string[]> {
   const repos: string[] = [];
@@ -64,4 +64,20 @@ export async function readLinkedWorktrees(repo: string): Promise<LinkedWorktrees
     ),
   );
   return { count: names.length, paths: paths.filter((path) => path !== null) };
+}
+
+/**
+ * When Git created the worktree, as an ISO time, or null when it can't be read. Uses the birth time of its
+ * folder under `.git/worktrees`, whose mtime moves with every commit and checkout.
+ */
+export async function readCreatedAt(worktree: string): Promise<string | null> {
+  try {
+    const link = await readFile(join(worktree, ".git"), "utf8");
+    const gitdir = /^gitdir: (.+)$/m.exec(link)?.[1]?.trim();
+    if (!gitdir) return null;
+    const { birthtimeMs } = await stat(resolve(worktree, gitdir));
+    return birthtimeMs > 0 ? new Date(birthtimeMs).toISOString() : null;
+  } catch {
+    return null;
+  }
 }

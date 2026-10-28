@@ -66,6 +66,8 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
       branch: string(item.branch),
       headSha: string(head?.sha),
       committedAt: string(head?.committed_at),
+      // Worktrunk's JSON has no creation time.
+      createdAt: null,
       tool: toolForPath(path),
       changes: changesFrom(worktree.changes),
       upstreamAhead: typeof upstream?.ahead === "number" ? upstream.ahead : null,

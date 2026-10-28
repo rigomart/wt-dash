@@ -1,7 +1,12 @@
 import { assess } from "./assess";
 import { readComparisonBase } from "./base";
 import { basename } from "node:path";
-import { discoverRepos, readLinkedWorktrees, type LinkedWorktrees } from "./discovery";
+import {
+  discoverRepos,
+  readCreatedAt,
+  readLinkedWorktrees,
+  type LinkedWorktrees,
+} from "./discovery";
 import { parseWorktrunk, SchemaMismatchError } from "./worktrunk";
 import type {
   CommandRunner,
@@ -18,6 +23,7 @@ interface DashboardOptions {
   sizeService: SizeService;
   discover?: (root: string, maxDepth: number) => Promise<string[]>;
   readLinked?: (repo: string) => Promise<LinkedWorktrees | null>;
+  readCreated?: (worktree: string) => Promise<string | null>;
 }
 
 /**
@@ -202,14 +208,19 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
               try {
                 rows = withSizes(parseWorktrunk(repo, result.stdout));
                 if (rows.length) {
-                  const base = await readComparisonBase(
-                    repo,
-                    rows[0]!.defaultBranch,
-                    options.runner,
-                    controller.signal,
-                  );
-                  rows = rows.map((row) => {
-                    const enriched = { ...row, mainBase: base };
+                  const [base, created] = await Promise.all([
+                    readComparisonBase(
+                      repo,
+                      rows[0]!.defaultBranch,
+                      options.runner,
+                      controller.signal,
+                    ),
+                    Promise.all(
+                      rows.map((row) => (options.readCreated ?? readCreatedAt)(row.path)),
+                    ),
+                  ]);
+                  rows = rows.map((row, index) => {
+                    const enriched = { ...row, mainBase: base, createdAt: created[index]! };
                     const assessment = assess(enriched);
                     return { ...enriched, verdict: assessment.verdict, reason: assessment.reason };
                   });

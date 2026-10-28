@@ -539,3 +539,35 @@ test("repos are listed most worktrees first, with the one that took the most spa
   expect(unmeasured.order).toEqual(["/r/big", "/r/alpha"]);
   expect([...unmeasured.first]).toEqual(["/r/big"]);
 });
+
+test("a scan reads each worktree's creation time, so a new worktree with no commits isn't Safe", async () => {
+  const payload: any = structuredClone(fixture);
+  for (const item of payload.items.slice(1)) {
+    item.display = { state: "empty" };
+    item.default_branch = { ahead: 0, behind: 0, integration: { reason: "same_commit" } };
+  }
+  const [, old, young] = payload.items.map((item: any) => item.worktree.path);
+  const created: Record<string, string> = {
+    [old]: "2026-09-27T00:00:00Z",
+    [young]: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+  };
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService,
+    discover: async () => ["/repo"],
+    runner: async (_command, args) =>
+      args.includes("list") ? result(JSON.stringify(payload)) : result("", 1),
+    readCreated: async (path) => created[path] ?? null,
+  });
+  try {
+    await service.refresh();
+    const rows = service.getSnapshot().rows;
+    expect(rows.map((row) => [row.path, row.createdAt, row.verdict, row.reason])).toEqual([
+      [old, created[old], "Safe", "No commits beyond main."],
+      [young, created[young], "Review", "Created 2h ago, so it may still be in use."],
+    ]);
+  } finally {
+    await service.close();
+  }
+});

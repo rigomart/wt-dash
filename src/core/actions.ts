@@ -1,5 +1,6 @@
 import { assess } from "./assess";
 import { readComparisonBase } from "./base";
+import { readCreatedAt } from "./discovery";
 import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { parseWorktrunk } from "./worktrunk";
@@ -66,6 +67,7 @@ function stamp(row: WorktreeRow): string {
     row.path,
     row.branch,
     row.headSha,
+    row.createdAt,
     row.changes,
     row.upstreamAhead,
     row.mainState,
@@ -199,6 +201,7 @@ export function createActionService(options: {
   wtPath: string;
   runner: CommandRunner;
   logPath: string;
+  readCreated?: (worktree: string) => Promise<string | null>;
 }): ActionService {
   let removalPlan: RemovalPlan | null = null;
   let prunePlan: PrunePlan | null = null;
@@ -234,8 +237,11 @@ export function createActionService(options: {
     const rows = parseWorktrunk(repoPath, listing.stdout);
     const found = rows.find((item) => paths.includes(item.path));
     if (!found) return rows;
-    const base = await readComparisonBase(repoPath, found.defaultBranch, options.runner);
-    return rows.map((item) => ({ ...item, mainBase: base }));
+    const [base, created] = await Promise.all([
+      readComparisonBase(repoPath, found.defaultBranch, options.runner),
+      Promise.all(rows.map((item) => (options.readCreated ?? readCreatedAt)(item.path))),
+    ]);
+    return rows.map((item, index) => ({ ...item, mainBase: base, createdAt: created[index]! }));
   }
   function matchListing(row: WorktreeRow, listing: WorktreeRow[]): RemovalEntry {
     const fresh = listing.find((item) => item.path === row.path);

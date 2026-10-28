@@ -1070,3 +1070,62 @@ test("stopping mid-batch starts nothing new, including the next repo's listing",
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+function noNewCommits(): any {
+  const payload: any = structuredClone(fixture);
+  payload.items[1].display = { state: "empty" };
+  payload.items[1].default_branch = { ahead: 0, behind: 0, integration: { reason: "same_commit" } };
+  return payload;
+}
+
+test("a young worktree with no new commits is previewed as Review and removed only when chosen", async () => {
+  const payload = noNewCommits();
+  const createdAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+  const row = { ...parseWorktrunk(repo, JSON.stringify(payload))[0]!, createdAt };
+  const { calls, runner } = fakeRepos({ payloads: { [repo]: payload } });
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  try {
+    const actions = createActionService({
+      wtPath: "/wt",
+      runner,
+      logPath: join(directory, "log"),
+      readCreated: async () => createdAt,
+    });
+    const plan = await actions.prepareRemoval([row]);
+    expect(plan.entries[0]).toMatchObject({
+      blockedReason: null,
+      row: { verdict: "Review", reason: "Created 2h ago, so it may still be in use." },
+    });
+    const result = await actions.executeRemoval(plan, { [row.id]: { include: true } });
+    expect(result.items.map((item) => item.status)).toEqual(["removed"]);
+    expect(removed(calls)).toEqual([row.path]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a worktree created again at the same path after the preview is skipped", async () => {
+  const payload = noNewCommits();
+  let createdAt = "2026-09-27T00:00:00Z";
+  const row = { ...parseWorktrunk(repo, JSON.stringify(payload))[0]!, createdAt };
+  const { calls, runner } = fakeRepos({ payloads: { [repo]: payload } });
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  try {
+    const actions = createActionService({
+      wtPath: "/wt",
+      runner,
+      logPath: join(directory, "log"),
+      readCreated: async () => createdAt,
+    });
+    const plan = await actions.prepareRemoval([row]);
+    expect(plan.entries[0]).toMatchObject({ blockedReason: null, row: { verdict: "Safe" } });
+    createdAt = new Date().toISOString();
+    const result = await actions.executeRemoval(plan, { [row.id]: { include: true } });
+    expect(result.items).toEqual([
+      { id: row.id, status: "skipped", error: "it changed; refresh and preview again" },
+    ]);
+    expect(removed(calls)).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
