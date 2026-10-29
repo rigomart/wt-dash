@@ -1,11 +1,19 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RemovalChoice, RemovalPlan, RemovalResult } from "../../src/core/actions";
 import type { WorktreeRow } from "../../src/core/types";
-import { createSandbox, type Built, type Repo, type Sandbox } from "../support/fixture";
+import {
+  createSandbox,
+  type Built,
+  type Repo,
+  type Sandbox,
+  TEST_TIMEOUT,
+} from "../support/fixture";
 import { named, on, record, type Gate, type Match, type Recorder } from "../support/runners";
 import { exists, row, scan } from "./helpers";
+
+setDefaultTimeout(TEST_TIMEOUT);
 
 let sandbox: Sandbox;
 

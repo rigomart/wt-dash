@@ -1,11 +1,21 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { assess, markerNote } from "../../src/core/assess";
 import { readCreatedAt } from "../../src/core/discovery";
 import type { DashboardService, DashboardSnapshot } from "../../src/core/types";
-import { createSandbox, findRow, OLD_AGE_MS, type Built, type Repo, type Sandbox } from "./fixture";
+import {
+  createSandbox,
+  findRow,
+  OLD_AGE_MS,
+  type Built,
+  type Repo,
+  type Sandbox,
+  TEST_TIMEOUT,
+} from "./fixture";
+
+setDefaultTimeout(TEST_TIMEOUT);
 
 let sandbox: Sandbox;
 let builds: Array<[string, Built]>;

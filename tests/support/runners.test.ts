@@ -1,6 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, test, setDefaultTimeout } from "bun:test";
 import { inSandbox } from "./app";
 import { named, record } from "./runners";
+import { TEST_TIMEOUT } from "./fixture";
+
+setDefaultTimeout(TEST_TIMEOUT);
 
 const ok = { exitCode: 0, stdout: "", stderr: "" };
 

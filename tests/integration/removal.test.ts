@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assess } from "../../src/core/assess";
@@ -9,9 +9,12 @@ import {
   type Repo,
   type Sandbox,
   type Services,
+  TEST_TIMEOUT,
 } from "../support/fixture";
 import { named, on, record } from "../support/runners";
 import { branches, exists, logFor, row, scan } from "./helpers";
+
+setDefaultTimeout(TEST_TIMEOUT);
 
 let sandbox: Sandbox;
 let services: Services;

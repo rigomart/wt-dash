@@ -1,10 +1,18 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createSandbox, type Built, type Repo, type Sandbox } from "../support/fixture";
+import {
+  createSandbox,
+  type Built,
+  type Repo,
+  type Sandbox,
+  TEST_TIMEOUT,
+} from "../support/fixture";
 import { named, on, record, type Recorder } from "../support/runners";
 import { row, waitFor } from "./helpers";
+
+setDefaultTimeout(TEST_TIMEOUT);
 
 let sandbox: Sandbox;
 let late: { repo: Repo; built: Built };

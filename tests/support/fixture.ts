@@ -18,6 +18,8 @@ import type {
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How old builders make anything that must be older than a day, unless told otherwise. */
 export const OLD_AGE_MS = 3 * DAY_MS;
+/** Per-test timeout for tests on real Git and Worktrunk, which take seconds each on slow CI runners. */
+export const TEST_TIMEOUT = 30_000;
 const prefix = "wt-dash-sandbox-";
 
 /** What the dashboard should show for a built row. */

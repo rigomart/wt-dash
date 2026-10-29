@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { assess, markerNote } from "../../src/core/assess";
@@ -11,9 +11,12 @@ import {
   type Expected,
   type Repo,
   type Sandbox,
+  TEST_TIMEOUT,
 } from "../support/fixture";
 import { named } from "../support/runners";
 import { row, timeline } from "./helpers";
+
+setDefaultTimeout(TEST_TIMEOUT);
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;

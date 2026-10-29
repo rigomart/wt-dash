@@ -14,7 +14,7 @@ const NAMED = ["escape", "enter", "tab", "space", "backspace", "up", "down", "le
 const WAIT_TIMEOUT = 5000;
 const POLLS_TO_SHOW_SETTLED_FRAME = 2;
 
-export const TEST_TIMEOUT = WAIT_TIMEOUT * 6;
+export { TEST_TIMEOUT } from "./fixture";
 
 export type FrameMatch = string | RegExp | ((frame: string) => boolean);
 
