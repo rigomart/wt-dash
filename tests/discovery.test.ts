@@ -67,8 +67,8 @@ test("a worktree's creation time is its Git folder's birth time, which later Git
   await writeFile(join(admin, "HEAD"), "ref: refs/heads/one\n");
 
   const created = Date.parse((await readCreatedAt(join(root, "absolute")))!);
-  // File birth times can trail Date.now() by up to a millisecond.
-  expect(created).toBeGreaterThanOrEqual(before - 1);
+  // Linux stamps files from a coarse clock that can trail Date.now() by a scheduler tick, up to 10 ms.
+  expect(created).toBeGreaterThanOrEqual(before - 10);
   expect(created).toBeLessThanOrEqual(after);
   expect(await readCreatedAt(join(root, "relative"))).toBe(new Date(created).toISOString());
 });
