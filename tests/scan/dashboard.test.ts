@@ -720,7 +720,6 @@ test("a scan reads each worktree's creation time, so a new worktree with no comm
   }
 });
 
-/** A size service whose measurements wait until the test settles them. */
 function heldSizes() {
   const held: Array<{
     path: string;
@@ -853,6 +852,77 @@ test("#24: a remeasure that settles after a rescan does not overwrite the rescan
       .rows.find((candidate) => candidate.branch === "feature/name")!;
     const remeasured = service.refreshSize(row.id);
     await service.refresh();
+    for (const entry of held.slice(3))
+      entry.settle({ sizeKiB: 128, measuredAt: "2026-10-01T02:00:00Z" });
+    await Bun.sleep(0);
+    expect(size(row.id)).toBe(128);
+    held[2]!.settle({ sizeKiB: 16, measuredAt: "2026-10-01T01:00:00Z" });
+    await remeasured;
+    expect(size(row.id)).toBe(128);
+    expect(service.getSnapshot().sizing).toEqual([]);
+  } finally {
+    await service.close();
+  }
+});
+
+test("#24: a targeted rescan of one repo still shows the size measured for another", async () => {
+  const { sizes, held } = heldSizes();
+  const listing = (repo: string) => {
+    const payload: any = structuredClone(fixture);
+    for (const item of payload.items) item.worktree.path = `${repo}${item.worktree.path}`;
+    return JSON.stringify(payload);
+  };
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: sizes,
+    discover: async () => ["/one", "/two"],
+    runner: async (_command, args) => result(args.includes("list") ? listing(args[1]!) : ""),
+  });
+  try {
+    await service.refresh();
+    await service.refresh(["/two"]);
+    for (const entry of held) entry.settle({ sizeKiB: 64, measuredAt: "2026-10-01T00:00:00Z" });
+    await Bun.sleep(0);
+    const snapshot = service.getSnapshot();
+    expect(
+      snapshot.rows.filter((row) => row.repoPath === "/one").map((row) => row.sizeKiB),
+    ).toEqual([64, 64]);
+    expect(snapshot.sizing).toEqual([]);
+  } finally {
+    await service.close();
+  }
+});
+
+test("#24: a remeasure started during a scan does not overwrite the size of the row the scan lists", async () => {
+  const { sizes, held } = heldSizes();
+  let listed!: () => void;
+  let gate: Promise<void> = Promise.resolve();
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: sizes,
+    discover: async () => ["/repo"],
+    runner: async (_command, args) => {
+      if (args.includes("list")) await gate;
+      return result();
+    },
+  });
+  const size = (id: string) =>
+    service.getSnapshot().rows.find((candidate) => candidate.id === id)?.sizeKiB;
+  try {
+    await service.refresh();
+    for (const entry of held.slice(0, 2))
+      entry.settle({ sizeKiB: 5, measuredAt: "2026-10-01T00:00:00Z" });
+    await Bun.sleep(0);
+    const row = service
+      .getSnapshot()
+      .rows.find((candidate) => candidate.branch === "feature/name")!;
+    gate = new Promise((resolve) => (listed = resolve));
+    const rescan = service.refresh();
+    const remeasured = service.refreshSize(row.id);
+    listed();
+    await rescan;
     for (const entry of held.slice(3))
       entry.settle({ sizeKiB: 128, measuredAt: "2026-10-01T02:00:00Z" });
     await Bun.sleep(0);

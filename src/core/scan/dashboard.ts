@@ -25,8 +25,9 @@ interface DashboardOptions {
 export function createDashboardService(options: DashboardOptions): DashboardService {
   const listeners = new Set<(snapshot: DashboardSnapshot) => void>();
   const controllers = new Set<AbortController>();
-  /** How many measurements are running for each folder; a rescan can start one while another runs. */
-  const measuring = new Map<string, number>();
+  const runningByPath = new Map<string, number>();
+  const newestTicketByPath = new Map<string, number>();
+  let measurements = 0;
   let closed = false;
   let generation = 0;
   let snapshot: DashboardSnapshot = {
@@ -40,7 +41,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
   };
 
   function publish(next: Omit<DashboardSnapshot, "sizing">): void {
-    snapshot = { ...next, sizing: [...measuring.keys()] };
+    snapshot = { ...next, sizing: [...runningByPath.keys()] };
     for (const listener of listeners) listener(snapshot);
   }
 
@@ -55,25 +56,21 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     });
   }
 
-  /** Counts `path` as sizing until `task` settles, then shows its saved size if `scanGeneration` is still current. Publish after calling. */
-  function track(
-    path: string,
-    task: Promise<SizeEntry | null>,
-    scanGeneration: number,
-  ): Promise<void> {
-    measuring.set(path, (measuring.get(path) ?? 0) + 1);
+  /** Callers publish afterwards, so the sizing mark reaches the screen. */
+  function track(path: string, task: Promise<SizeEntry | null>): Promise<void> {
+    const ticket = ++measurements;
+    newestTicketByPath.set(path, ticket);
+    runningByPath.set(path, (runningByPath.get(path) ?? 0) + 1);
     return task
-      .catch(() => {
-        // A failed size check leaves the row's current estimate in place.
-        return null;
-      })
+      .catch(() => null)
       .then((measured) => {
-        const left = measuring.get(path)! - 1;
-        if (left) measuring.set(path, left);
-        else measuring.delete(path);
+        const left = runningByPath.get(path)! - 1;
+        if (left) runningByPath.set(path, left);
+        else runningByPath.delete(path);
+        const newest = newestTicketByPath.get(path) === ticket;
+        if (!left) newestTicketByPath.delete(path);
         if (closed) return;
-        // A rescan may have replaced the worktree at this path since the measurement started.
-        const entry = current(scanGeneration) ? (measured ?? options.sizeService.get(path)) : null;
+        const entry = newest ? (measured ?? options.sizeService.get(path)) : null;
         let changed = !left;
         const rows = snapshot.rows.map((row) => {
           if (
@@ -89,10 +86,10 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       });
   }
 
-  function scheduleSizes(rows: WorktreeRow[], scanGeneration: number, first: boolean): void {
+  function scheduleSizes(rows: WorktreeRow[], first: boolean): void {
     for (const row of rows)
       if (row.path !== null)
-        void track(row.path, options.sizeService.measureIfStale(row.path, first), scanGeneration);
+        void track(row.path, options.sizeService.measureIfStale(row.path, first));
   }
 
   return {
@@ -194,7 +191,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             },
           );
           if (!current(scanGeneration)) return;
-          scheduleSizes(rows, scanGeneration, first.has(repo));
+          scheduleSizes(rows, first.has(repo));
           sized.add(repo);
           publish({
             ...snapshot,
@@ -268,7 +265,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
                 continue;
               }
               if (!current(scanGeneration)) continue;
-              if (!sized.has(repo)) scheduleSizes(rows, scanGeneration, first.has(repo));
+              if (!sized.has(repo)) scheduleSizes(rows, first.has(repo));
               publish({
                 ...snapshot,
                 rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows],
@@ -310,7 +307,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     async refreshSize(worktreeId) {
       const row = snapshot.rows.find((candidate) => candidate.id === worktreeId);
       if (!row || row.path === null || closed) return;
-      const measured = track(row.path, options.sizeService.measure(row.path), generation);
+      const measured = track(row.path, options.sizeService.measure(row.path));
       publish(snapshot);
       await measured;
     },
