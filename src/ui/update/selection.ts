@@ -1,4 +1,4 @@
-import { removalBlockReason } from "../../core/actions";
+import { removalBlockReason } from "../../core/assess";
 import type { WorktreeRow } from "../../core/types";
 import { branchLabel, rowsLabel, sizeLabel } from "../format";
 import { inJob } from "../selectors";

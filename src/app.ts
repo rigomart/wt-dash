@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { createActionService, type ActionService } from "./core/actions";
+import { createActionService } from "./core/removal/service";
+import type { ActionService } from "./core/removal/types";
 import { createDashboardService } from "./core/scan/dashboard";
 import { discoverRepos } from "./core/scan/discovery";
 import { createSizeService } from "./core/sizes";

@@ -1,4 +1,4 @@
-import type { RemovalChoice } from "../../core/actions";
+import type { RemovalChoice } from "../../core/removal/types";
 import type { WorktreeRow } from "../../core/types";
 import { branchLabel, countLabel, rowsLabel } from "../format";
 import { listView, projectsView, type ListView } from "../selectors";

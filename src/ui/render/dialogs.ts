@@ -1,5 +1,5 @@
 import { recentAgentMark } from "../../core/assess";
-import type { RemovalEntry } from "../../core/actions";
+import type { RemovalEntry } from "../../core/removal/types";
 import type { WorktreeRow } from "../../core/types";
 import { branchLabel, countLabel, rowsLabel, sizeLabel } from "../format";
 import {

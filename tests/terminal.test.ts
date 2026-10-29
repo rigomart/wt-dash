@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { runTerminal } from "../src/ui/terminal";
-import type { ActionService, RemovalEntry } from "../src/core/actions";
+import type { ActionService, RemovalEntry } from "../src/core/removal/types";
 import type { DashboardService, DashboardSnapshot, WorktreeRow } from "../src/core/types";
 
 function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}): WorktreeRow {

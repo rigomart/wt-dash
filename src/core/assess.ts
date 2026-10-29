@@ -212,3 +212,7 @@ function assessGit(facts: WorktreeFacts, now: number): Assessment {
       return unknown(`Couldn't compare it with ${base}.`);
   }
 }
+
+export function removalBlockReason(row: WorktreeFacts): string | null {
+  return assess(row).removalBlockReason;
+}

@@ -1,4 +1,4 @@
-import type { RemovalResult } from "../../core/actions";
+import type { RemovalResult } from "../../core/removal/types";
 import type { WorktreeRow } from "../../core/types";
 import { branchLabel, rowsLabel, sizeLabel } from "../format";
 import type { Context, Effect, Result, Tone, UiState } from "../state";
