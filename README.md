@@ -4,7 +4,7 @@ See every Git worktree on your Mac or Linux machine in one terminal dashboard, f
 
 Coding agents create worktrees constantly. Claude Code keeps them in `.claude/worktrees`, Codex in `~/.codex/worktrees`, and other tools elsewhere. Each one carries its own `node_modules`, and nothing cleans them up. A few weeks of agent work can leave dozens of worktrees and many gigabytes behind.
 
-wt-dash scans your repositories, lists every linked worktree with its size and Git state, and sorts them by how safe they are to delete. Select what you want gone, confirm once, and the removal runs in the background while you keep working.
+wt-dash scans your repositories, lists every linked worktree with its size and Git state, along with local branches left behind without a worktree, and sorts them by how safe they are to delete. Select what you want gone, confirm once, and the removal runs in the background while you keep working.
 
 It is built on [Worktrunk](https://worktrunk.dev/): Worktrunk computes the Git facts and performs every removal.
 
@@ -60,15 +60,25 @@ wt-dash looks for repositories up to two folder levels below each folder you giv
 
 Every worktree gets one of four verdicts. The list groups them into sections, and each row shows its Git status and the reason behind it.
 
-| Verdict    | Status                                                                                                                   | Removal                            |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
-| **Safe**   | no new commits, merged                                                                                                   | Allowed                            |
-| **Review** | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history; no new commits, under a day old | Allowed after you read the warning |
-| **Review** | locked, status unknown                                                                                                   | Blocked                            |
-| **Busy**   | rebase, merge, or cherry-pick in progress; unresolved conflicts                                                          | Blocked                            |
-| **Broken** | folder missing                                                                                                           | Offers to prune Git's record       |
+| Verdict    | Status                                                                                                                                                       | Removal                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| **Safe**   | no new commits, merged                                                                                                                                       | Allowed                            |
+| **Review** | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history; no new commits, under a day old; an agent marked it in the last day | Allowed after you read the warning |
+| **Review** | locked, status unknown                                                                                                                                       | Blocked                            |
+| **Busy**   | rebase, merge, or cherry-pick in progress; unresolved conflicts                                                                                              | Blocked                            |
+| **Broken** | folder missing                                                                                                                                               | Offers to prune Git's record       |
 
-**Safe** means Worktrunk reports clean content already integrated into, or identical to, the default branch. A branch with nothing beyond the default branch, either the same commit or one the default branch has since moved past, looks that way the moment its worktree is created. So, like `wt step prune`, wt-dash calls such a worktree Safe only once it is a day old. Until then it is Review, with a reason such as "Created 2h ago, so it may still be in use", and `a` leaves it out. Its age comes from when Git created its folder under `.git/worktrees`; if that can't be read, it stays Review. A branch whose own commits reached the default branch through a squash or rebase merge is Safe at any age. wt-dash does not check pull request status or running processes. A lock always blocks removal, however old; unlock it yourself with `git worktree unlock` if it is stale.
+**Safe** means Worktrunk reports clean content already integrated into, or identical to, the default branch. A branch with nothing beyond the default branch, either the same commit or one the default branch has since moved past, looks that way the moment its worktree is created. So, like `wt step prune`, wt-dash calls such a worktree Safe only once it is a day old. Until then it is Review, with a reason such as "Created 2h ago, so it may still be in use", and `a` leaves it out. Its age comes from when Git created its folder under `.git/worktrees`; if that can't be read, it stays Review. A branch whose own commits reached the default branch through a squash or rebase merge is Safe at any age. A lock always blocks removal, however old; unlock it yourself with `git worktree unlock` if it is stale.
+
+wt-dash does not check pull request status or running processes. It does read agent marks: Worktrunk's agent plugins, such as the one `wt config plugins claude install` adds, mark a branch 🤖 while an agent works in it and 💬 while it waits for input, and clear the mark when the session ends. A worktree that would be Safe but carries a mark set in the last day is Review instead, with a reason such as "An agent was working here 20m ago", so `a` leaves it out; you can still remove it. A mark whose time can't be read counts as recent. An older mark is probably left over from a session that didn't end cleanly, so it only shows in the details, as "Agent mark from 28d ago, likely stale". Marks belong to a branch name, so renaming a branch drops its mark.
+
+### Branches without a worktree
+
+Removing a worktree often leaves its branch behind. wt-dash lists these local branches too, other than the default branch. Their size column reads "branch", since there is no folder to measure, and they get the same verdicts:
+
+- A branch merged into the default branch, by any route, is Safe once it is a day old, like `wt step prune`. Its age comes from its oldest reflog entry, or else from when Git last wrote it. If neither can be read, or it is younger, it is Review.
+- A branch with unmerged commits or unrelated history is Review, and is only deleted if you press `D` in the confirmation dialog.
+- A recent agent mark makes it Review, as for a worktree.
 
 A blocked row says what to do next, for example "finish or abort the rebase first".
 
@@ -80,14 +90,14 @@ On terminals at least 100 columns wide, the projects sit in a sidebar and the wo
 
 On the projects:
 
-| Key             | Action                                                   |
-| --------------- | -------------------------------------------------------- |
-| ↑/↓ or j/k      | Move                                                     |
-| Enter, → or Tab | Open the focused project, or every project together      |
-| /               | Search every project by repo, branch, tool, or path      |
-| a               | Select every Safe worktree in the focused project or all |
-| x               | Remove the selection                                     |
-| Esc             | Clear the selection, then stop a running removal         |
+| Key             | Action                                              |
+| --------------- | --------------------------------------------------- |
+| ↑/↓ or j/k      | Move                                                |
+| Enter, → or Tab | Open the focused project, or every project together |
+| /               | Search every project by repo, branch, tool, or path |
+| a               | Select every Safe row in the focused project or all |
+| x               | Remove the selection                                |
+| Esc             | Clear the selection, then stop a running removal    |
 
 In a worktree list:
 
@@ -99,7 +109,7 @@ In a worktree list:
 | [ / ]      | Previous / next project                                                     |
 | /          | Search by repo, branch, tool, or path                                       |
 | Space      | Select the focused worktree                                                 |
-| a          | Select every Safe worktree in view                                          |
+| a          | Select every Safe row in view                                               |
 | Enter or x | Remove the selection, or the focused worktree                               |
 | i          | Show full details for the focused worktree                                  |
 | s / S      | Change the sort (size, age, repo) / reverse it                              |
@@ -113,10 +123,10 @@ Everywhere, `r` rescans every repository, `?` shows every key, and `q` quits. Se
 
 Enter opens one confirmation dialog. It lists each worktree and its size, the total, and which ones would lose uncommitted or untracked changes. Press `y` or Enter to go ahead, or Esc to cancel.
 
-- **Branches are kept** unless they are merged. Press `D` in the dialog to delete unmerged branches too.
+- **Branches are kept** unless they are merged. Press `D` in the dialog to delete unmerged branches too. An unmerged branch without a worktree is skipped unless you press `D`, since deleting it is all its removal does.
 - **Processes are left alone** unless you press `e`, which asks Worktrunk to stop processes running inside.
 - **Ignored files go with the worktree.** That includes `.env` copies, local databases, and caches, the same way Worktrunk treats them.
-- **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, it was created again at the same path, or a rebase or merge is in progress, it is skipped and comes back with a note. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
+- **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, it was created again at the same path, a rebase or merge is in progress, or an agent marked it since the preview, it is skipped and comes back with a note. A branch without a worktree is skipped if it moved, was deleted, or now has a worktree, or if a worktree folder has the same name as the branch, because Worktrunk would remove that worktree instead. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
 - **Worktrunk hooks are skipped.** Project-defined cleanup commands do not run.
 
 Removals run in the background, and you can queue more while one is going. Each attempt is logged to `~/.cache/wt-dash/removals.log`.

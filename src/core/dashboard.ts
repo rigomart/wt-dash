@@ -1,12 +1,6 @@
-import { assess } from "./assess";
-import { readComparisonBase } from "./base";
 import { basename } from "node:path";
-import {
-  discoverRepos,
-  readCreatedAt,
-  readLinkedWorktrees,
-  type LinkedWorktrees,
-} from "./discovery";
+import { discoverRepos, readLinkedWorktrees, type LinkedWorktrees } from "./discovery";
+import { enrichRows, listArgs } from "./listing";
 import { parseWorktrunk, SchemaMismatchError } from "./worktrunk";
 import type {
   CommandRunner,
@@ -24,6 +18,7 @@ interface DashboardOptions {
   discover?: (root: string, maxDepth: number) => Promise<string[]>;
   readLinked?: (repo: string) => Promise<LinkedWorktrees | null>;
   readCreated?: (worktree: string) => Promise<string | null>;
+  readBranchCreated?: (repo: string, branch: string) => Promise<string | null>;
 }
 
 /**
@@ -80,17 +75,19 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
 
   function withSizes(rows: WorktreeRow[]): WorktreeRow[] {
     return rows.map((row) => {
-      const cached = options.sizeService.get(row.path);
+      const cached = row.path === null ? null : options.sizeService.get(row.path);
       return cached ? { ...row, sizeKiB: cached.sizeKiB, sizeMeasuredAt: cached.measuredAt } : row;
     });
   }
 
   function scheduleSizes(rows: WorktreeRow[], scanGeneration: number, first: boolean): void {
     for (const row of rows) {
+      const path = row.path;
+      if (path === null) continue;
       void options.sizeService
-        .measureIfStale(row.path, first)
+        .measureIfStale(path, first)
         .then(() => {
-          const entry = options.sizeService.get(row.path);
+          const entry = options.sizeService.get(path);
           if (!entry || !current(scanGeneration)) return;
           const index = snapshot.rows.findIndex((candidate) => candidate.id === row.id);
           if (index < 0) return;
@@ -187,11 +184,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
           const controller = new AbortController();
           controllers.add(controller);
           try {
-            const result = await options.runner(
-              options.wtPath,
-              ["-C", repo, "--config-set", "list.json-schema=2", "list", "--format=json"],
-              controller.signal,
-            );
+            const result = await options.runner(options.wtPath, listArgs(repo), controller.signal);
             if (!current(scanGeneration)) continue;
             scanned.add(repo);
             if (result.exitCode !== 0) {
@@ -206,25 +199,16 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             } else {
               let rows: WorktreeRow[];
               try {
-                rows = withSizes(parseWorktrunk(repo, result.stdout));
-                if (rows.length) {
-                  const [base, created] = await Promise.all([
-                    readComparisonBase(
-                      repo,
-                      rows[0]!.defaultBranch,
-                      options.runner,
-                      controller.signal,
-                    ),
-                    Promise.all(
-                      rows.map((row) => (options.readCreated ?? readCreatedAt)(row.path)),
-                    ),
-                  ]);
-                  rows = rows.map((row, index) => {
-                    const enriched = { ...row, mainBase: base, createdAt: created[index]! };
-                    const assessment = assess(enriched);
-                    return { ...enriched, verdict: assessment.verdict, reason: assessment.reason };
-                  });
-                }
+                rows = await enrichRows(
+                  repo,
+                  withSizes(parseWorktrunk(repo, result.stdout)),
+                  options.runner,
+                  {
+                    readCreated: options.readCreated,
+                    readBranchCreated: options.readBranchCreated,
+                    signal: controller.signal,
+                  },
+                );
               } catch (error) {
                 if (!current(scanGeneration)) continue;
                 publish({
@@ -285,7 +269,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     },
     async refreshSize(worktreeId) {
       const row = snapshot.rows.find((candidate) => candidate.id === worktreeId);
-      if (!row || closed) return;
+      if (!row || row.path === null || closed) return;
       const scanGeneration = generation;
       const entry = await options.sizeService.measure(row.path);
       if (!entry || !current(scanGeneration)) return;

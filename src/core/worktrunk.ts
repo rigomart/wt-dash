@@ -41,45 +41,57 @@ export function toolForPath(path: string): ToolName {
   return "Other";
 }
 
+/** Worktrees other than the main one, and local branches without a worktree other than the default branch. */
 export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] {
   const payload = object(JSON.parse(stdout) as unknown);
   if (payload?.schema !== 2) throw new SchemaMismatchError(payload?.schema);
   if (!Array.isArray(payload.items)) throw new Error("Worktrunk JSON has no items array");
+  const defaultBranchName = string(object(payload.repo)?.default_branch);
 
   const rows: WorktreeRow[] = [];
   for (const raw of payload.items) {
     const item = object(raw);
-    const worktree = object(item?.worktree);
-    if (!item || !worktree || worktree.main !== false) continue;
-    const path = string(worktree.path);
-    if (!path) continue;
+    if (!item) continue;
+    const worktree = object(item.worktree);
+    const branch = string(item.branch);
+    let path: string | null = null;
+    if (worktree) {
+      if (worktree.main !== false) continue;
+      path = string(worktree.path);
+      if (!path) continue;
+    } else if (!branch || branch === defaultBranchName) continue;
     const head = object(item.head);
     const upstream = object(item.upstream);
     const defaultBranch = object(item.default_branch);
     const integration = object(defaultBranch?.integration);
     const display = object(item.display);
     const facts: WorktreeFacts = {
-      id: `${repoPath}\0${path}`,
+      // A path holds no NUL, so the two kinds of id cannot collide.
+      id: path === null ? `${repoPath}\0branch\0${branch}` : `${repoPath}\0${path}`,
+      kind: path === null ? "branch" : "worktree",
       repoPath,
       repoName: basename(repoPath),
       path,
-      branch: string(item.branch),
+      branch,
       headSha: string(head?.sha),
       committedAt: string(head?.committed_at),
       // Worktrunk's JSON has no creation time.
       createdAt: null,
-      tool: toolForPath(path),
-      changes: changesFrom(worktree.changes),
+      marker: string(item.marker),
+      // The JSON has no marker time; it is read from Worktrunk's state in Git config.
+      markerSetAt: null,
+      tool: path === null ? "Other" : toolForPath(path),
+      changes: changesFrom(worktree?.changes),
       upstreamAhead: typeof upstream?.ahead === "number" ? upstream.ahead : null,
       mainState: string(display?.state),
       integrationReason: string(integration?.reason),
-      lockReason: string(object(worktree.locked)?.reason),
+      lockReason: string(object(worktree?.locked)?.reason),
       mainAhead: typeof defaultBranch?.ahead === "number" ? defaultBranch.ahead : null,
-      defaultBranch: string(object(payload.repo)?.default_branch),
+      defaultBranch: defaultBranchName,
       mainBase: null,
-      locked: object(worktree.locked) !== null,
-      prunable: object(worktree.prunable) !== null,
-      operation: string(worktree.operation),
+      locked: object(worktree?.locked) !== null,
+      prunable: object(worktree?.prunable) !== null,
+      operation: string(worktree?.operation),
     };
     rows.push({
       ...facts,

@@ -18,6 +18,7 @@ function commandResult(stdout = "", exitCode = 0) {
 
 function porcelain(payload: any): string {
   return payload.items
+    .filter((item: any) => item.worktree)
     .map((item: any) => {
       const worktree = item.worktree;
       const lines = [
@@ -136,7 +137,7 @@ test("a batch confirmed while another runs waits for it, and pruning waits for b
     releaseFirst();
     expect((await first).items.map((item) => item.status)).toEqual(["removed"]);
     expect((await second).items.map((item) => item.status)).toEqual(["removed"]);
-    expect(removed).toEqual([branchRow.path, detachedRow.path]);
+    expect(removed).toEqual([branchRow.path!, detachedRow.path!]);
     await expect(actions.preparePrune(repo)).resolves.toMatchObject({ repoPath: repo });
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -235,7 +236,7 @@ test("detached worktree removal passes its absolute path", async () => {
     const actions = createActionService({ wtPath: "/wt", runner, logPath: join(directory, "log") });
     const plan = await actions.prepareRemoval([detachedRow]);
     await actions.executeRemoval(plan, { [detachedRow.id]: { include: true } });
-    expect(calls.find((call) => call.includes("remove"))?.at(-1)).toBe(detachedRow.path);
+    expect(calls.find((call) => call.includes("remove"))?.at(-1)).toBe(detachedRow.path!);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -348,37 +349,88 @@ test("reports an unverified result when Worktrunk succeeds but its output cannot
   }
 });
 
-test("marker changes do not invalidate Git confirmation or trigger activity checks", async () => {
-  const marked = structuredClone(fixture);
-  Object.assign(marked.items[1]!, { marker: "🤖" });
-  const row = parseWorktrunk(repo, JSON.stringify(marked))[0]!;
+/** Worktrunk's state in Git config, as `git config --null --get-regexp` prints it. */
+function markConfig(marks: Record<string, { marker: string; setAt: number }>): string {
+  return Object.entries(marks)
+    .map(
+      ([branch, mark]) =>
+        `worktrunk.state.${branch}.marker\n${JSON.stringify({ marker: mark.marker, set_at: Math.floor(mark.setAt / 1000) })}\0`,
+    )
+    .join("");
+}
+
+test.each([
+  ["switching between agent marks keeps", "🤖", "💬", "removed"],
+  ["an agent mark set after the preview invalidates", null, "🤖", "skipped"],
+] as const)("%s the confirmation, without process checks", async (_name, before, after, status) => {
+  const payload: any = structuredClone(fixture);
+  const marks: Record<string, { marker: string; setAt: number }> = {};
+  const mark = (marker: string | null) => {
+    payload.items[1].marker = marker ?? undefined;
+    if (marker) marks["feature/name"] = { marker, setAt: Date.now() - 60_000 };
+    else delete marks["feature/name"];
+  };
+  mark(before);
   let lists = 0;
   const calls: string[][] = [];
   const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
   const runner: CommandRunner = async (command, args) => {
     calls.push([command, ...args]);
-    const state = worktreeState(args, marked);
+    const state = worktreeState(args, payload);
     if (state) return state;
+    if (args.includes("--get-regexp")) return commandResult(markConfig(marks));
     if (args.includes("list")) {
-      if (++lists > 1) Object.assign(marked.items[1]!, { marker: "💬" });
-      return commandResult(JSON.stringify(marked));
+      if (++lists > 1) mark(after);
+      return commandResult(JSON.stringify(payload));
     }
     if (args.includes("remove"))
       return commandResult(
-        JSON.stringify({ kind: "worktree", path: row.path, branch_outcome: "deleted" }),
+        JSON.stringify({ kind: "worktree", path: branchRow.path, branch_outcome: "deleted" }),
       );
     return commandResult();
   };
   try {
     const actions = createActionService({ wtPath: "/wt", runner, logPath: join(directory, "log") });
-    const plan = await actions.prepareRemoval([row]);
+    const plan = await actions.prepareRemoval([{ ...branchRow, marker: before }]);
     expect(plan.entries[0]?.blockedReason).toBeNull();
-    const result = await actions.executeRemoval(plan, { [row.id]: { include: true } });
-    expect(result.items[0]?.status).toBe("removed");
+    expect(plan.entries[0]?.row.verdict).toBe(before ? "Review" : "Safe");
+    const result = await actions.executeRemoval(plan, { [branchRow.id]: { include: true } });
+    expect(result.items[0]?.status).toBe(status);
     expect(lists).toBe(2);
-    expect(
-      calls.some((call) => call[0] === "lsof" || call[0] === "ps" || call.includes("--get-regexp")),
-    ).toBe(false);
+    expect(calls.some((call) => call[0] === "lsof" || call[0] === "ps")).toBe(false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("an agent mark set after the batch's listing still skips the removal", async () => {
+  const marks: Record<string, { marker: string; setAt: number }> = {};
+  const readsByPreviewAndBatchListing = 2;
+  let reads = 0;
+  let removals = 0;
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  const runner: CommandRunner = async (_command, args) => {
+    const state = worktreeState(args, fixture);
+    if (state) return state;
+    if (args.includes("--get-regexp")) {
+      if (++reads > readsByPreviewAndBatchListing)
+        marks["feature/name"] = { marker: "🤖", setAt: Date.now() };
+      return commandResult(markConfig(marks));
+    }
+    if (args.includes("list")) return commandResult(JSON.stringify(fixture));
+    if (args.includes("remove")) removals++;
+    return commandResult();
+  };
+  try {
+    const actions = createActionService({ wtPath: "/wt", runner, logPath: join(directory, "log") });
+    const plan = await actions.prepareRemoval([branchRow]);
+    expect(plan.entries[0]?.row.verdict).toBe("Safe");
+    const result = await actions.executeRemoval(plan, { [branchRow.id]: { include: true } });
+    expect(result.items[0]).toMatchObject({
+      status: "skipped",
+      error: "an agent started work here; refresh and preview again",
+    });
+    expect(removals).toBe(0);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -680,7 +732,7 @@ test("interleaved repos are removed one repo at a time, with items and warnings 
       [branchRowB.id, "unverified"],
       [detachedRow.id, "unverified"],
     ]);
-    expect(removed(batch)).toEqual([branchRow.path, detachedRow.path, branchRowB.path]);
+    expect(removed(batch)).toEqual([branchRow.path!, detachedRow.path!, branchRowB.path!]);
     expect([wtLists(batch, repo), wtLists(batch, repoB)]).toEqual([1, 1]);
     expect(batch.filter((call) => call.includes("--porcelain"))).toHaveLength(3);
     expect(batch.filter((call) => call.includes("status"))).toHaveLength(3);
@@ -770,11 +822,11 @@ test.each<
     const { calls, runner } = fakeRepos({
       payloads: { [repo]: payload },
       statuses,
-      gitDirs: { [target!.path]: gitDir },
+      gitDirs: { [target!.path!]: gitDir },
       onRemove: async (path) => {
         if (path !== first!.path) return;
         change.payload?.(payload.items[1]);
-        if (change.status) statuses[target!.path] = change.status;
+        if (change.status) statuses[target!.path!] = change.status;
         if (change.marker) await mkdir(join(gitDir, change.marker), { recursive: true });
         if (change.todo) {
           await mkdir(join(gitDir, "sequencer"), { recursive: true });
@@ -799,7 +851,7 @@ test.each<
       { id: target!.id, status: "skipped", error: reason },
       { id: last!.id, status: "removed", branchOutcome: "deleted" },
     ]);
-    expect(removed(calls)).toEqual([first!.path, last!.path]);
+    expect(removed(calls)).toEqual([first!.path!, last!.path!]);
     expect(wtLists(calls, repo)).toBe(2);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -878,7 +930,7 @@ test("a detached worktree is re-listed when the default branch moves", async () 
     ["skipped", "it changed; refresh and preview again"],
   ]);
   expect(wtLists(calls, repo)).toBe(2);
-  expect(removed(calls)).toEqual([first!.path]);
+  expect(removed(calls)).toEqual([first!.path!]);
 });
 
 test("a forced branch deletion is re-listed when the branch's upstream moves", async () => {
@@ -955,7 +1007,7 @@ test("a failing ref read right before a removal skips only that worktree", async
       },
       { id: detachedRow.id, status: "removed", branchOutcome: "deleted" },
     ]);
-    expect(removed(calls)).toEqual([detachedRow.path]);
+    expect(removed(calls)).toEqual([detachedRow.path!]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -985,7 +1037,7 @@ test("a failing listing when a repo's removals start skips only that repo's work
       { id: detachedRow.id, status: "skipped", error: reason },
     ]);
     expect(wtLists(calls, repo)).toBe(2);
-    expect(removed(calls)).toEqual([branchRowB.path]);
+    expect(removed(calls)).toEqual([branchRowB.path!]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -1037,7 +1089,7 @@ test.each([
         { id: branchRow.id, status: "skipped", error: reason },
         { id: detachedRow.id, status: "removed", branchOutcome: "deleted" },
       ]);
-      expect(removed(calls)).toEqual([detachedRow.path]);
+      expect(removed(calls)).toEqual([detachedRow.path!]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1098,7 +1150,7 @@ test("a young worktree with no new commits is previewed as Review and removed on
     });
     const result = await actions.executeRemoval(plan, { [row.id]: { include: true } });
     expect(result.items.map((item) => item.status)).toEqual(["removed"]);
-    expect(removed(calls)).toEqual([row.path]);
+    expect(removed(calls)).toEqual([row.path!]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -1124,6 +1176,237 @@ test("a worktree created again at the same path after the preview is skipped", a
     expect(result.items).toEqual([
       { id: row.id, status: "skipped", error: "it changed; refresh and preview again" },
     ]);
+    expect(removed(calls)).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+function withBranch(state: string, extra: object = {}): any {
+  const payload: any = structuredClone(fixture);
+  payload.items.push({
+    branch: "old",
+    head: { sha: "old-sha", committed_at: "2026-09-20T00:00:00Z" },
+    default_branch:
+      state === "integrated"
+        ? { ahead: 0, behind: 2, integration: { reason: "ancestor" } }
+        : { ahead: 2, behind: 0 },
+    display: { state },
+    ...extra,
+  });
+  return payload;
+}
+const branchCreated = "2026-09-01T00:00:00Z";
+const aged = { readBranchCreated: async () => branchCreated };
+const branchOnly = (payload: any, root = repo) => ({
+  ...parseWorktrunk(root, JSON.stringify(payload)).find((row) => row.kind === "branch")!,
+  createdAt: branchCreated,
+});
+const branchRemoved = (outcome = "deleted") =>
+  JSON.stringify([
+    {
+      kind: "branch_only",
+      branch: "old",
+      branch_checked_out_at: null,
+      branch_outcome: outcome,
+      pruned: false,
+    },
+  ]);
+
+test("removes a merged branch without a worktree by name, checking no files and stopping no processes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  try {
+    const payload = withBranch("integrated");
+    const row = branchOnly(payload);
+    const { calls, runner } = fakeRepos({
+      payloads: { [repo]: payload },
+      tips: { "refs/heads/old": "old-sha" },
+      removeOutput: () => branchRemoved(),
+    });
+    const actions = createActionService({
+      wtPath: "/wt",
+      runner,
+      logPath: join(directory, "log"),
+      ...aged,
+    });
+    const plan = await actions.prepareRemoval([row]);
+    expect(plan.entries[0]).toMatchObject({
+      blockedReason: null,
+      requiresDiscard: false,
+      branchWillBeRetained: false,
+      row: { verdict: "Safe" },
+    });
+    const result = await actions.executeRemoval(plan, {
+      [row.id]: { include: true, reapProcesses: true },
+    });
+    expect(result.items).toEqual([{ id: row.id, status: "removed", branchOutcome: "deleted" }]);
+    expect(calls.find((call) => call.includes("remove"))).toEqual([
+      "/wt",
+      "-C",
+      repo,
+      "remove",
+      "-y",
+      "--no-hooks",
+      "--foreground",
+      "--format=json",
+      "old",
+    ]);
+    expect(calls.some((call) => call.includes("status"))).toBe(false);
+    expect(calls.some((call) => call.includes("prune"))).toBe(false);
+    const log = JSON.parse((await readFile(join(directory, "log"), "utf8")).trim());
+    expect(log).toMatchObject({
+      branch: "old",
+      path: null,
+      branchOutcome: "deleted",
+      pruned: false,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test.each(["ahead", "would_conflict", "orphan"])(
+  "a branch without a worktree that is %s is removed only with forced deletion",
+  async (state) => {
+    const payload = withBranch(state);
+    const row = branchOnly(payload);
+    const { calls, runner } = fakeRepos({
+      payloads: { [repo]: payload },
+      tips: { "refs/heads/old": "old-sha" },
+      removeOutput: () => branchRemoved(),
+    });
+    const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+    const plan = await actions.prepareRemoval([row]);
+    expect(plan.entries[0]).toMatchObject({ blockedReason: null, branchWillBeRetained: true });
+    expect(
+      (await actions.executeRemoval(plan, { [row.id]: { include: true } })).items[0],
+    ).toMatchObject({ status: "skipped", error: "Deleting the unmerged branch was not confirmed" });
+    expect(removed(calls)).toEqual([]);
+    const forced = await actions.executeRemoval(await actions.prepareRemoval([row]), {
+      [row.id]: { include: true, forceDeleteBranch: true },
+    });
+    expect(forced.items[0]?.status).toBe("removed");
+    expect(calls.find((call) => call.includes("remove"))?.slice(-2)).toEqual(["-D", "old"]);
+  },
+);
+
+test("a branch Worktrunk keeps counts as not removed", async () => {
+  const payload = withBranch("integrated");
+  const row = branchOnly(payload);
+  const { runner } = fakeRepos({
+    payloads: { [repo]: payload },
+    tips: { "refs/heads/old": "old-sha" },
+    removeOutput: () => branchRemoved("retained_unmerged"),
+  });
+  const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+  const result = await actions.executeRemoval(await actions.prepareRemoval([row]), {
+    [row.id]: { include: true },
+  });
+  expect(result.items[0]).toEqual({
+    id: row.id,
+    status: "failed",
+    branchOutcome: "retained_unmerged",
+    error: "Worktrunk kept the branch (retained unmerged)",
+  });
+});
+
+test.each<[string, (payload: any, tips: Record<string, string | null>) => void, string]>([
+  [
+    "moved",
+    (_payload, tips) => (tips["refs/heads/old"] = "newer"),
+    "it changed; refresh and preview again",
+  ],
+  [
+    "was deleted",
+    (_payload, tips) => (tips["refs/heads/old"] = null),
+    "it is missing or now has a worktree",
+  ],
+  [
+    "gained a worktree",
+    (payload) =>
+      payload.items.push({
+        branch: "old",
+        head: { sha: "old-sha" },
+        worktree: { path: "/Users/test/new-worktree", main: false },
+      }),
+    "it is missing or now has a worktree",
+  ],
+])(
+  "a branch without a worktree that %s after the repo's removals start is skipped",
+  async (_name, change, reason) => {
+    const payload = withBranch("integrated");
+    const row = branchOnly(payload);
+    const tips: Record<string, string | null> = { "refs/heads/old": "old-sha" };
+    const { calls, runner } = fakeRepos({
+      payloads: { [repo]: payload },
+      tips,
+      removeOutput: (target) =>
+        target === "old"
+          ? branchRemoved()
+          : JSON.stringify({ kind: "worktree", path: target, branch_outcome: "deleted" }),
+      onRemove: (target) => {
+        if (target === branchRow.path) change(payload, tips);
+      },
+    });
+    const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+    const plan = await actions.prepareRemoval([branchRow, row]);
+    const result = await actions.executeRemoval(plan, {
+      [branchRow.id]: { include: true },
+      [row.id]: { include: true },
+    });
+    expect(result.items[1]).toEqual({ id: row.id, status: "skipped", error: reason });
+    expect(removed(calls)).toEqual([branchRow.path!]);
+  },
+);
+
+test("a branch that gained a worktree between preview and confirmation is skipped", async () => {
+  const payload = withBranch("integrated");
+  const row = branchOnly(payload);
+  const { calls, runner } = fakeRepos({ payloads: { [repo]: payload } });
+  const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+  const plan = await actions.prepareRemoval([row]);
+  const item = payload.items.at(-1);
+  item.worktree = {
+    path: "/Users/test/new-worktree",
+    main: false,
+    changes: fixture.items[1]!.worktree!.changes,
+  };
+  const result = await actions.executeRemoval(plan, { [row.id]: { include: true } });
+  expect(result.items[0]).toMatchObject({
+    status: "skipped",
+    error: "it is missing or now has a worktree",
+  });
+  expect(removed(calls)).toEqual([]);
+});
+
+test("a branch named like a worktree's folder is not removed, since Worktrunk would remove the worktree", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  try {
+    const root = join(directory, "repo");
+    await mkdir(join(root, "wt-x"), { recursive: true });
+    const payload: any = structuredClone(fixture);
+    payload.items[0].worktree.path = root;
+    payload.items[1].worktree.path = join(root, "wt-x");
+    payload.items.push({
+      branch: "wt-x",
+      head: { sha: "x-sha" },
+      default_branch: { ahead: 0, behind: 0, integration: { reason: "same_commit" } },
+      display: { state: "empty" },
+    });
+    const row = branchOnly(payload, root);
+    const { calls, runner } = fakeRepos({
+      payloads: { [root]: payload },
+      tips: { "refs/heads/wt-x": "x-sha" },
+    });
+    const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+    const result = await actions.executeRemoval(await actions.prepareRemoval([row]), {
+      [row.id]: { include: true },
+    });
+    expect(result.items[0]).toMatchObject({
+      status: "skipped",
+      error:
+        "a worktree folder has the same name, so Worktrunk would remove that instead; delete it with git branch",
+    });
     expect(removed(calls)).toEqual([]);
   } finally {
     await rm(directory, { recursive: true, force: true });

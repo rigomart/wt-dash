@@ -13,6 +13,9 @@ function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}):
     headSha: "abcdef1234",
     committedAt: "2026-09-28T00:00:00Z",
     createdAt: "2026-09-27T00:00:00Z",
+    kind: "worktree",
+    marker: null,
+    markerSetAt: null,
     tool: "Claude",
     changes: {
       staged: false,
@@ -427,6 +430,21 @@ test("x then y removes in the background while the table stays on screen", async
   }
 });
 
+test("the confirm bar warns about an agent that was recently active", async () => {
+  const item = row("api", 2000, {
+    marker: "🤖",
+    markerSetAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+  });
+  const { actions } = fakeActions((rows) => rows.map((selected) => entry(selected)));
+  const ui = await start(110, 24, [item], actions);
+  try {
+    ui.setup.mockInput.pressKey("x");
+    expect(await ui.frame()).toContain("api: An agent was working here 20m ago.");
+  } finally {
+    await ui.stop();
+  }
+});
+
 test("the confirm bar names uncommitted changes it will discard, and esc cancels", async () => {
   const item = row("api", 2000);
   const { actions, executed } = fakeActions((rows) =>
@@ -779,6 +797,43 @@ test("the sidebar describes the focused project under the projects", async () =>
     expect(card).toContain("  Claude Code 1 · Codex 1");
     expect(card).toContain("  largest 2.0 MB · api");
     expect(withoutSidebar(frame)).not.toContain("SAFE TO FREE");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("a branch without a worktree reads as a branch, with its stale agent mark in the details", async () => {
+  let inspected = 0;
+  const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
+    inspectFiles: async () => {
+      inspected++;
+      return { localFiles: [], ignoredFiles: [], disposableIgnored: 0 };
+    },
+  });
+  const ui = await start(
+    130,
+    24,
+    [
+      row("old-feature", 0, {
+        kind: "branch",
+        path: null,
+        changes: null,
+        sizeKiB: null,
+        marker: "🤖",
+        markerSetAt: new Date(Date.now() - 28 * 86_400_000).toISOString(),
+      }),
+    ],
+    actions,
+  );
+  try {
+    await Bun.sleep(300);
+    const frame = await ui.frame();
+    expect(frame).toMatch(/old-feature .* branch\n/);
+    expect(frame).toContain("1 branch · 0 KB");
+    expect(frame).toContain("Branch without a worktree · created");
+    expect(frame).toContain("Agent mark from 28d ago, likely stale.");
+    expect(frame).not.toContain("checking files");
+    expect(inspected).toBe(0);
   } finally {
     await ui.stop();
   }

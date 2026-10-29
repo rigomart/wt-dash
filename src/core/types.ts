@@ -10,16 +10,28 @@ export interface ChangeFlags {
   conflicted: boolean | null;
 }
 
+/** A linked worktree, or a local branch left behind without one. */
+export type RowKind = "worktree" | "branch";
+
 export interface WorktreeFacts {
   id: string;
+  kind: RowKind;
   repoPath: string;
   repoName: string;
-  path: string;
+  /** The worktree folder; null for a branch without a worktree. */
+  path: string | null;
   branch: string | null;
   headSha: string | null;
   committedAt: string | null;
-  /** When Git created the worktree, or null when it could not be read. */
+  /**
+   * When Git created the worktree, or, for a branch without one, its oldest reflog entry or else when its
+   * ref was last written. Null when it could not be read.
+   */
   createdAt: string | null;
+  /** Worktrunk's marker for the branch, such as an agent plugin's 🤖 or 💬. */
+  marker: string | null;
+  /** When the marker was set, or null when Worktrunk's state didn't say. */
+  markerSetAt: string | null;
   tool: ToolName;
   changes: ChangeFlags | null;
   upstreamAhead: number | null;
@@ -103,6 +115,7 @@ export interface DashboardService {
   subscribe(listener: (snapshot: DashboardSnapshot) => void): () => void;
   /** Rescan every repository, or only `repos` when given. Current rows stay visible until replaced. */
   refresh(repos?: string[]): Promise<void>;
+  /** Does nothing for a branch without a worktree, which has no folder to measure. */
   refreshSize(worktreeId: string): Promise<void>;
   close(): Promise<void>;
 }

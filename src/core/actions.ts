@@ -1,9 +1,8 @@
-import { assess } from "./assess";
-import { readComparisonBase } from "./base";
-import { readCreatedAt } from "./discovery";
-import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { assess, recentAgentMark } from "./assess";
+import { appendFile, mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { enrichRows, listArgs, readMarks } from "./listing";
 import { parseWorktrunk } from "./worktrunk";
 import type { CommandRunner, WorktreeFacts, WorktreeRow } from "./types";
 
@@ -62,6 +61,7 @@ export interface ActionService {
 }
 
 function stamp(row: WorktreeRow): string {
+  const agentActive = recentAgentMark(row) !== null;
   return JSON.stringify([
     row.id,
     row.repoPath,
@@ -79,13 +79,14 @@ function stamp(row: WorktreeRow): string {
     row.lockReason,
     row.operation,
     row.prunable,
+    agentActive,
   ]);
 }
 type WorktreeState = Pick<
   WorktreeFacts,
-  "path" | "headSha" | "branch" | "locked" | "lockReason" | "prunable" | "operation"
->;
-function stateStamp(state: WorktreeState): string {
+  "headSha" | "branch" | "locked" | "lockReason" | "prunable" | "operation"
+> & { path: string };
+function stateStamp(state: Omit<WorktreeState, "path">): string {
   return JSON.stringify([
     state.headSha,
     state.branch,
@@ -120,8 +121,7 @@ function parseWorktreeList(stdout: string): Array<Omit<WorktreeState, "operation
       current.lockReason = value;
     } else if (key === "prunable") current.prunable = true;
   }
-  // Git lists the main worktree first.
-  return worktrees.slice(1);
+  return worktrees;
 }
 /** Operation names match Worktrunk's. */
 const operationMarkers = [
@@ -205,6 +205,7 @@ export function createActionService(options: {
   runner: CommandRunner;
   logPath: string;
   readCreated?: (worktree: string) => Promise<string | null>;
+  readBranchCreated?: (repo: string, branch: string) => Promise<string | null>;
 }): ActionService {
   let removalPlan: RemovalPlan | null = null;
   let prunePlan: PrunePlan | null = null;
@@ -213,6 +214,7 @@ export function createActionService(options: {
   let removals = 0;
 
   async function readFiles(row: WorktreeRow): Promise<FileReport> {
+    if (row.path === null) throw new Error("A branch without a worktree has no files");
     const status = await options.runner("git", [
       "-C",
       row.path,
@@ -227,29 +229,22 @@ export function createActionService(options: {
       );
     return statusFiles(status.stdout);
   }
-  async function listRepo(repoPath: string, paths: string[]): Promise<WorktreeRow[]> {
-    const listing = await options.runner(options.wtPath, [
-      "-C",
-      repoPath,
-      "--config-set",
-      "list.json-schema=2",
-      "list",
-      "--format=json",
-    ]);
+  async function listRepo(repoPath: string, wanted: WorktreeRow[]): Promise<WorktreeRow[]> {
+    const listing = await options.runner(options.wtPath, listArgs(repoPath));
     if (listing.exitCode !== 0) throw failure("wt list", listing);
     const rows = parseWorktrunk(repoPath, listing.stdout);
-    const found = rows.find((item) => paths.includes(item.path));
-    if (!found) return rows;
-    const [base, created] = await Promise.all([
-      readComparisonBase(repoPath, found.defaultBranch, options.runner),
-      Promise.all(rows.map((item) => (options.readCreated ?? readCreatedAt)(item.path))),
-    ]);
-    return rows.map((item, index) => ({ ...item, mainBase: base, createdAt: created[index]! }));
+    if (!rows.some((item) => wanted.some((row) => row.id === item.id))) return rows;
+    return enrichRows(repoPath, rows, options.runner, {
+      readCreated: options.readCreated,
+      readBranchCreated: options.readBranchCreated,
+    });
   }
   function matchListing(row: WorktreeRow, listing: WorktreeRow[]): RemovalEntry {
-    const fresh = listing.find((item) => item.path === row.path);
+    const fresh = listing.find((item) => item.id === row.id);
     const blockedReason = !fresh
-      ? "it is missing or is the main worktree"
+      ? row.kind === "branch"
+        ? "it is missing or now has a worktree"
+        : "it is missing or is the main worktree"
       : stamp(fresh) !== stamp(row)
         ? "it changed; refresh and preview again"
         : null;
@@ -272,7 +267,7 @@ export function createActionService(options: {
   }
   async function checkAgainst(row: WorktreeRow, listing: WorktreeRow[]): Promise<RemovalEntry> {
     const entry = matchListing(row, listing);
-    if (entry.blockedReason) return entry;
+    if (entry.blockedReason || entry.row.kind === "branch") return entry;
     try {
       Object.assign(entry, await readFiles(entry.row));
     } catch (error) {
@@ -341,10 +336,7 @@ export function createActionService(options: {
   async function snapshotRepo(repoPath: string, rows: WorktreeRow[]): Promise<RepoSnapshot> {
     // Tips first: a ref that moves while the listing runs then shows up as moved later.
     const tips = await readTips(repoPath, rows.flatMap(verdictRefs));
-    const listing = await listRepo(
-      repoPath,
-      rows.map((row) => row.path),
-    );
+    const listing = await listRepo(repoPath, rows);
     return { listing, tips };
   }
   async function readOperation(path: string): Promise<string | null> {
@@ -365,20 +357,20 @@ export function createActionService(options: {
     }
     return null;
   }
+  async function listWorktrees(repoPath: string): Promise<ReturnType<typeof parseWorktreeList>> {
+    const list = await options.runner("git", ["-C", repoPath, "worktree", "list", "--porcelain"]);
+    if (list.exitCode !== 0) throw failure("git worktree list", list);
+    return parseWorktreeList(list.stdout);
+  }
   /** Merge, upstream and integration state are not read here; removeBatch re-lists when a ref they depend on moves. */
   async function recheckWorktree(
     entry: RemovalEntry,
     confirmed: WorktreeRow,
   ): Promise<string | null> {
-    const list = await options.runner("git", [
-      "-C",
-      entry.row.repoPath,
-      "worktree",
-      "list",
-      "--porcelain",
-    ]);
-    if (list.exitCode !== 0) throw failure("git worktree list", list);
-    const state = parseWorktreeList(list.stdout).find((item) => item.path === entry.row.path);
+    // Git lists the main worktree first.
+    const state = (await listWorktrees(entry.row.repoPath))
+      .slice(1)
+      .find((item) => item.path === entry.row.path);
     if (!state) return "it is missing or is the main worktree";
     const fresh: WorktreeRow = {
       ...confirmed,
@@ -395,6 +387,31 @@ export function createActionService(options: {
       return error instanceof Error ? error.message : String(error);
     }
     return filesStamp(files) !== filesStamp(entry) ? "Local files changed since preview" : null;
+  }
+  async function recheckMark(row: WorktreeRow): Promise<string | null> {
+    if (!row.branch || recentAgentMark(row)) return null;
+    const mark = (await readMarks(row.repoPath, options.runner)).get(row.branch);
+    if (!mark) return null;
+    return recentAgentMark({ ...row, marker: mark.marker, markerSetAt: mark.setAt })
+      ? "an agent started work here; refresh and preview again"
+      : null;
+  }
+  async function recheckBranch(row: WorktreeRow): Promise<string | null> {
+    const branch = row.branch!;
+    const worktrees = await listWorktrees(row.repoPath);
+    if (worktrees.some((item) => item.branch === branch))
+      return "it is missing or now has a worktree";
+    // `wt remove <name>` removes the worktree whose folder is <name>, if there is one, before it looks for a branch.
+    const asPath = resolve(row.repoPath, branch);
+    const real = (path: string) => realpath(path).catch(() => path);
+    const named = new Set([asPath, await real(asPath)]);
+    for (const item of worktrees) {
+      if (named.has(item.path) || named.has(await real(item.path)))
+        return "a worktree folder has the same name, so Worktrunk would remove that instead; delete it with git branch";
+    }
+    const tip = await readTip(row.repoPath, `refs/heads/${branch}`);
+    if (tip === null) return "it is missing or now has a worktree";
+    return tip !== row.headSha ? "it changed; refresh and preview again" : null;
   }
 
   async function removeBatch(
@@ -440,6 +457,11 @@ export function createActionService(options: {
           skip("Forced branch deletion does not apply");
           continue;
         }
+        // Removing an unmerged branch without a worktree does nothing unless it is force-deleted.
+        if (row.kind === "branch" && entry.branchWillBeRetained && !choice.forceDeleteBranch) {
+          skip("Deleting the unmerged branch was not confirmed");
+          continue;
+        }
         let blockedReason: string | null;
         try {
           snapshot ??= snapshotRepo(repo, repoRows);
@@ -451,7 +473,12 @@ export function createActionService(options: {
             snapshot = Promise.resolve(repoState);
           }
           const current = matchListing(row, repoState.listing);
-          blockedReason = current.blockedReason ?? (await recheckWorktree(entry, current.row));
+          blockedReason =
+            current.blockedReason ??
+            (await recheckMark(row)) ??
+            (row.kind === "branch"
+              ? await recheckBranch(row)
+              : await recheckWorktree(entry, current.row));
         } catch (error) {
           skip(String(error));
           continue;
@@ -463,11 +490,14 @@ export function createActionService(options: {
         const flags = [
           choice.discardChanges && entry.requiresDiscard ? "-f" : null,
           choice.forceDeleteBranch ? "-D" : null,
-          choice.reapProcesses ? "--reap" : null,
+          choice.reapProcesses && row.kind === "worktree" ? "--reap" : null,
         ].filter((flag): flag is string => flag !== null);
+        const target = row.path ?? row.branch!;
+        const label = row.path ?? `branch ${row.branch}`;
         onProgress?.(row.id, "removing");
         let exitCode = -1;
         let branchOutcome: string | undefined;
+        let pruned: boolean | undefined;
         let error: string | undefined;
         try {
           const result = await options.runner(options.wtPath, [
@@ -479,7 +509,7 @@ export function createActionService(options: {
             "--foreground",
             "--format=json",
             ...flags,
-            row.path,
+            target,
           ]);
           exitCode = result.exitCode;
           if (result.exitCode !== 0) throw failure("wt remove", result);
@@ -489,16 +519,24 @@ export function createActionService(options: {
             (item): item is Record<string, unknown> =>
               typeof item === "object" &&
               item !== null &&
-              item.kind === "worktree" &&
-              item.path === row.path,
+              (row.kind === "branch"
+                ? item.kind === "branch_only" && item.branch === row.branch
+                : item.kind === "worktree" && item.path === row.path),
           );
           if (!value || typeof value.branch_outcome !== "string") {
             throw new Error("Unexpected Worktrunk removal result");
           }
           branchOutcome = value.branch_outcome;
-          items[index] = { id: row.id, status: "removed", branchOutcome };
-          succeededRepos.add(row.repoPath);
-          onProgress?.(row.id, "removed");
+          if (typeof value.pruned === "boolean") pruned = value.pruned;
+          if (row.kind === "branch" && branchOutcome !== "deleted") {
+            error = `Worktrunk kept the branch (${branchOutcome.replaceAll("_", " ")})`;
+            items[index] = { id: row.id, status: "failed", branchOutcome, error };
+            onProgress?.(row.id, "failed");
+          } else {
+            items[index] = { id: row.id, status: "removed", branchOutcome };
+            if (row.kind === "worktree") succeededRepos.add(row.repoPath);
+            onProgress?.(row.id, "removed");
+          }
         } catch (cause) {
           error = String(cause);
           const status = exitCode === 0 ? "unverified" : "failed";
@@ -506,9 +544,9 @@ export function createActionService(options: {
           onProgress?.(row.id, status);
           if (status === "unverified") {
             warnings.push(
-              `Removal outcome for ${row.path} could not be verified; check the refreshed list`,
+              `Removal outcome for ${label} could not be verified; check the refreshed list`,
             );
-            succeededRepos.add(row.repoPath);
+            if (row.kind === "worktree") succeededRepos.add(row.repoPath);
           }
         }
         try {
@@ -520,10 +558,11 @@ export function createActionService(options: {
             flags,
             exitCode,
             branchOutcome: branchOutcome ?? null,
+            ...(pruned === undefined ? {} : { pruned }),
             error: error ?? null,
           });
         } catch (cause) {
-          warnings.push(`Could not write removal log for ${row.path}: ${String(cause)}`);
+          warnings.push(`Could not write removal log for ${label}: ${String(cause)}`);
         }
       }
     }
@@ -558,7 +597,7 @@ export function createActionService(options: {
           const indexes = rows.flatMap((row, index) => (row.repoPath === repo ? [index] : []));
           const listing = listRepo(
             repo,
-            indexes.map((index) => rows[index]!.path),
+            indexes.map((index) => rows[index]!),
           );
           for (const index of indexes) {
             const row = rows[index]!;
