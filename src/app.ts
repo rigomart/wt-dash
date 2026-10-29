@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { createActionService, type ActionService } from "./core/actions";
-import { createDashboardService } from "./core/dashboard";
-import { discoverRepos } from "./core/discovery";
+import { createDashboardService } from "./core/scan/dashboard";
+import { discoverRepos } from "./core/scan/discovery";
 import { createSizeService } from "./core/sizes";
 import type { CommandRunner, DashboardService, SizeService } from "./core/types";
 

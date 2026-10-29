@@ -26,3 +26,9 @@ export async function runCommand(
     signal?.removeEventListener("abort", onAbort);
   }
 }
+
+export function failure(name: string, result: { exitCode: number; stderr: string }): Error {
+  return new Error(
+    `${name} exited ${result.exitCode}: ${result.stderr.trim() || "no error details"}`,
+  );
+}

@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { assess, markerNote } from "../../src/core/assess";
-import { readCreatedAt } from "../../src/core/discovery";
+import { readCreatedAt } from "../../src/core/scan/discovery";
 import type { DashboardService, DashboardSnapshot } from "../../src/core/types";
 import {
   createSandbox,

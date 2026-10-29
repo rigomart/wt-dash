@@ -2,8 +2,8 @@ import { afterAll, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { assess, markerNote } from "../../src/core/assess";
-import { createDashboardService } from "../../src/core/dashboard";
-import { readCreatedAt } from "../../src/core/discovery";
+import { createDashboardService } from "../../src/core/scan/dashboard";
+import { readCreatedAt } from "../../src/core/scan/discovery";
 import type { WorktreeRow } from "../../src/core/types";
 import {
   createSandbox,

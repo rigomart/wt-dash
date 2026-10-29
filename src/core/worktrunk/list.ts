@@ -1,6 +1,19 @@
 import { basename } from "node:path";
-import type { ChangeFlags, ToolName, WorktreeFacts, WorktreeRow } from "./types";
-import { assess } from "./assess";
+import type { ChangeFlags, CommandRunner, ToolName, WorktreeFacts, WorktreeRow } from "../types";
+import { assess } from "../assess";
+
+/** `wt list` arguments for a repo's worktrees and, unless `branches` is false, its local branches without one. */
+export function listArgs(repo: string, branches = true): string[] {
+  return [
+    "-C",
+    repo,
+    "--config-set",
+    "list.json-schema=2",
+    "list",
+    ...(branches ? ["--branches"] : []),
+    "--format=json",
+  ];
+}
 
 export class SchemaMismatchError extends Error {
   constructor(schema: unknown) {
@@ -97,4 +110,53 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
     rows.push({ ...facts, sizeKiB: null, sizeMeasuredAt: null, verdict, reason });
   }
   return rows;
+}
+
+export interface Mark {
+  marker: string;
+  setAt: string | null;
+}
+
+const markKey = /^worktrunk\.state\.(.+)\.marker$/;
+
+/**
+ * Worktrunk's marks by branch, from `worktrunk.state.<branch>.marker` entries such as
+ * `{"marker":"🤖","set_at":1790780978}`. A value that isn't that JSON gives a mark with no time; config
+ * that can't be read gives no marks.
+ */
+export async function readMarks(
+  repo: string,
+  runner: CommandRunner,
+  signal?: AbortSignal,
+): Promise<Map<string, Mark>> {
+  const marks = new Map<string, Mark>();
+  try {
+    const result = await runner(
+      "git",
+      ["-C", repo, "config", "--null", "--get-regexp", "^worktrunk\\.state\\..*\\.marker$"],
+      signal,
+    );
+    // Exit 1 means no entry matched.
+    if (result.exitCode !== 0) return marks;
+    for (const entry of result.stdout.split("\0")) {
+      const newline = entry.indexOf("\n");
+      if (newline < 0) continue;
+      const branch = markKey.exec(entry.slice(0, newline))?.[1];
+      if (branch) marks.set(branch, parseMark(entry.slice(newline + 1)));
+    }
+  } catch {}
+  return marks;
+}
+
+function parseMark(value: string): Mark {
+  try {
+    const parsed = JSON.parse(value) as { marker?: unknown; set_at?: unknown };
+    if (typeof parsed.marker === "string") {
+      const seconds = parsed.set_at;
+      const date = typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000) : null;
+      const setAt = date && !Number.isNaN(date.getTime()) ? date.toISOString() : null;
+      return { marker: parsed.marker, setAt };
+    }
+  } catch {}
+  return { marker: value.trim(), setAt: null };
 }

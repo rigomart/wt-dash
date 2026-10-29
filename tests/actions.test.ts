@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fixture from "./fixtures/list-v2.json";
-import { parseWorktrunk } from "../src/core/worktrunk";
+import { parseWorktrunk } from "../src/core/worktrunk/list";
 import { createActionService, type RemovalChoice } from "../src/core/actions";
 import type { CommandRunner, WorktreeRow } from "../src/core/types";
 
