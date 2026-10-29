@@ -4,6 +4,7 @@ import { assess, recentAgentMark } from "../assess";
 import { readTip } from "../git/refs";
 import { readFiles, readOperation } from "../git/status";
 import { listWorktrees } from "../git/worktrees";
+import { readCreatedAt } from "../scan/discovery";
 import type { CommandRunner, WorktreeRow } from "../types";
 import { readMarks } from "../worktrunk/list";
 import { filesStamp, stateStamp } from "./plan";
@@ -14,6 +15,7 @@ export async function recheckWorktree(
   entry: RemovalEntry,
   confirmed: WorktreeRow,
   runner: CommandRunner,
+  readCreated: (worktree: string) => Promise<string | null> = readCreatedAt,
 ): Promise<string | null> {
   // Git lists the main worktree first.
   const state = (await listWorktrees(entry.row.repoPath, runner))
@@ -23,6 +25,7 @@ export async function recheckWorktree(
   const fresh: WorktreeRow = {
     ...confirmed,
     ...state,
+    createdAt: await readCreated(state.path),
     operation: state.prunable ? null : await readOperation(state.path, runner),
   };
   const blocked = assess(fresh).removalBlockReason;

@@ -114,7 +114,7 @@ export async function removeBatch(
           (await recheckMark(row, options.runner)) ??
           (row.kind === "branch"
             ? await recheckBranch(row, options.runner)
-            : await recheckWorktree(entry, current.row, options.runner));
+            : await recheckWorktree(entry, current.row, options.runner, options.readCreated));
       } catch (error) {
         skip(String(error));
         continue;
