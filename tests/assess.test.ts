@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assess, markerNote, MIN_AGE_MS } from "../src/core/assess";
-import { parseWorktrunk } from "../src/core/worktrunk";
+import { parseWorktrunk } from "../src/core/worktrunk/list";
 import fixture from "./fixtures/list-v2.json";
 import type { ChangeFlags, WorktreeFacts } from "../src/core/types";
 

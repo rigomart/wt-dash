@@ -1,6 +1,15 @@
-import { describe, expect, test } from "bun:test";
-import fixture from "./fixtures/list-v2.json";
-import { parseWorktrunk, SchemaMismatchError, toolForPath } from "../src/core/worktrunk";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import fixture from "../fixtures/list-v2.json";
+import {
+  parseWorktrunk,
+  readMarks,
+  SchemaMismatchError,
+  toolForPath,
+} from "../../src/core/worktrunk/list";
+import type { CommandRunner } from "../../src/core/types";
 
 const repo = "/Users/test/projects/sample";
 
@@ -109,5 +118,76 @@ describe("branches without a worktree", () => {
       marker: "🤖",
       markerSetAt: null,
     });
+  });
+});
+
+describe("readMarks", () => {
+  const runner: CommandRunner = async (command, args) => {
+    const child = Bun.spawn([command, ...args], { stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    return { stdout, stderr, exitCode };
+  };
+
+  let directory: string;
+  let repo: string;
+  async function git(...args: string[]): Promise<string> {
+    const result = await runner("git", ["-C", repo, ...args]);
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+    return result.stdout.trim();
+  }
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "dash-listing-"));
+    repo = join(directory, "repo");
+    await runner("git", ["init", "-q", "-b", "main", repo]);
+    await git(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "a",
+    );
+  });
+  afterAll(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  test("reads Worktrunk's marks by branch, tolerating values that aren't its JSON", async () => {
+    expect((await readMarks(repo, runner)).size).toBe(0);
+    await git(
+      "config",
+      "worktrunk.state.feature/a.b.marker",
+      '{"marker":"🤖","set_at":1790780978}',
+    );
+    await git("config", "worktrunk.state.waiting.marker", '{"marker":"💬"}');
+    await git("config", "worktrunk.state.plain.marker", "✅");
+    await git("config", "worktrunk.state.other.note", "ignored");
+    expect(Object.fromEntries(await readMarks(repo, runner))).toEqual({
+      "feature/a.b": { marker: "🤖", setAt: new Date(1790780978 * 1000).toISOString() },
+      waiting: { marker: "💬", setAt: null },
+      plain: { marker: "✅", setAt: null },
+    });
+  });
+
+  test("a mark keeps its marker when its time is out of range", async () => {
+    await git("config", "worktrunk.state.far.marker", '{"marker":"🤖","set_at":1e20}');
+    expect((await readMarks(repo, runner)).get("far")).toEqual({ marker: "🤖", setAt: null });
+    await git("config", "--unset", "worktrunk.state.far.marker");
+  });
+
+  test("config that can't be read gives no marks", async () => {
+    const failing: CommandRunner = async () => {
+      throw new Error("spawn failed");
+    };
+    expect((await readMarks(repo, failing)).size).toBe(0);
+    expect((await readMarks(join(directory, "missing"), runner)).size).toBe(0);
   });
 });

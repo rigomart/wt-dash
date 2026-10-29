@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { createServices } from "../../src/app";
 import type { ActionService } from "../../src/core/actions";
-import { discoverRepos, readCreatedAt } from "../../src/core/discovery";
+import { discoverRepos, readCreatedAt } from "../../src/core/scan/discovery";
 import type {
   CommandResult,
   CommandRunner,

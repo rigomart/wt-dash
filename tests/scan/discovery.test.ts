@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverRepos, readCreatedAt, readLinkedWorktrees } from "../src/core/discovery";
+import { discoverRepos, readCreatedAt, readLinkedWorktrees } from "../../src/core/scan/discovery";
 
 const roots: string[] = [];
 afterEach(async () => {

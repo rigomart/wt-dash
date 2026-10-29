@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
-import fixture from "./fixtures/list-v2.json";
-import { createDashboardService, listingOrder } from "../src/core/dashboard";
+import fixture from "../fixtures/list-v2.json";
+import { createDashboardService } from "../../src/core/scan/dashboard";
 import type {
   CommandRunner,
   DashboardService,
   DashboardSnapshot,
   SizeEntry,
   SizeService,
-} from "../src/core/types";
+} from "../../src/core/types";
 
 const data = JSON.stringify(fixture);
 const sizeService: SizeService = {
@@ -506,7 +506,7 @@ test("a failed worktree listing leaves the repo to its full listing", async () =
 });
 
 test("Git-safe rows are immediately available while other repositories are still scanning", async () => {
-  const { removalBlockReason } = await import("../src/core/actions");
+  const { removalBlockReason } = await import("../../src/core/actions");
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -683,32 +683,6 @@ test("a targeted rescan recounts only its repos", async () => {
     { path: "/two", linked: 0 },
   ]);
   await service.close();
-});
-
-test("repos are listed most worktrees first, with the one that took the most space last time second", () => {
-  const linked = (count: number, paths: string[] = []) => ({ count, paths });
-  const sizes: Record<string, number> = { "/trees/h1": 900, "/trees/h2": 900, "/trees/b1": 50 };
-  const { order, first } = listingOrder(
-    [
-      { path: "/r/alpha", linked: linked(2) },
-      { path: "/r/big", linked: linked(9, ["/trees/b1"]) },
-      { path: "/r/heavy", linked: linked(2, ["/trees/h1", "/trees/h2"]) },
-      { path: "/r/gone", linked: null },
-      { path: "/r/mid", linked: linked(5) },
-    ],
-    (path) => sizes[path] ?? null,
-  );
-  expect(order).toEqual(["/r/big", "/r/heavy", "/r/mid", "/r/alpha", "/r/gone"]);
-  expect([...first]).toEqual(["/r/big", "/r/heavy"]);
-  const unmeasured = listingOrder(
-    [
-      { path: "/r/alpha", linked: linked(2) },
-      { path: "/r/big", linked: linked(9) },
-    ],
-    () => null,
-  );
-  expect(unmeasured.order).toEqual(["/r/big", "/r/alpha"]);
-  expect([...unmeasured.first]).toEqual(["/r/big"]);
 });
 
 test("a scan reads each worktree's creation time, so a new worktree with no commits isn't Safe", async () => {
