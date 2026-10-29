@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { context, entry, openedWorktreeList, press, row, send } from "./support/update";
-import { initialState } from "../src/ui/state";
+import { context, entry, openedWorktreeList, press, row, send } from "../support/update";
+import { initialState } from "../../src/ui/state";
 
 test("a plan that arrives after esc cancelled the check is ignored", () => {
   const ctx = context([row("a", 10)]);
