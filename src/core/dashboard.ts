@@ -250,15 +250,12 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             } else {
               let rows: WorktreeRow[];
               try {
-                rows = await enrichRows(
-                  repo,
-                  withSizes(parseWorktrunk(repo, result.stdout)),
-                  options.runner,
-                  {
+                rows = withSizes(
+                  await enrichRows(repo, parseWorktrunk(repo, result.stdout), options.runner, {
                     readCreated: options.readCreated,
                     readBranchCreated: options.readBranchCreated,
                     signal: controller.signal,
-                  },
+                  }),
                 );
               } catch (error) {
                 if (!current(scanGeneration)) continue;
