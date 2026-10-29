@@ -69,6 +69,33 @@ test("preserves full lock reason and Worktrunk commit count", () => {
   });
 });
 
+test("reads how far a branch is from main, the lines it changes, its latest subject and its vars", () => {
+  const payload: any = structuredClone(fixture);
+  payload.items[1].default_branch = { ahead: 3, behind: 2, diff: { added: 18, deleted: 4 } };
+  expect(parseWorktrunk(repo, JSON.stringify(payload))[0]).toMatchObject({
+    mainAhead: 3,
+    mainBehind: 2,
+    mainDiff: { added: 18, deleted: 4 },
+    subject: "feature",
+  });
+  payload.items[1].vars = { task: "Rate limit the API", count: 3 };
+  expect(parseWorktrunk(repo, JSON.stringify(payload))[0]).toMatchObject({
+    vars: { task: "Rate limit the API" },
+    description: null,
+  });
+  payload.items[1].vars = {};
+  expect(parseWorktrunk(repo, JSON.stringify(payload))[0]!.vars).toBeNull();
+  // A task that timed out leaves null, which reads as unknown rather than zero.
+  payload.items[1].default_branch = { ahead: null, behind: null, diff: null };
+  payload.items[1].head.subject = null;
+  expect(parseWorktrunk(repo, JSON.stringify(payload))[0]).toMatchObject({
+    mainAhead: null,
+    mainBehind: null,
+    mainDiff: null,
+    subject: null,
+  });
+});
+
 describe("branches without a worktree", () => {
   const payload: any = structuredClone(fixture);
   payload.items.push(

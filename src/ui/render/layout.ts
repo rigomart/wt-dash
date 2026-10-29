@@ -37,7 +37,7 @@ export function sidebarWidth(width: number): number {
 }
 
 export function bottomPanelHeight(bodyHeight: number): number {
-  const lines = Math.min(7, bodyHeight - 5);
+  const lines = Math.min(8, bodyHeight - 5);
   return lines >= 3 ? lines : 0;
 }
 

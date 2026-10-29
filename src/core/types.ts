@@ -10,6 +10,11 @@ export interface ChangeFlags {
   conflicted: boolean | null;
 }
 
+export interface LineCounts {
+  added: number;
+  deleted: number;
+}
+
 /** A linked worktree, or a local branch left behind without one. */
 export type RowKind = "worktree" | "branch";
 
@@ -39,6 +44,15 @@ export interface WorktreeFacts {
   integrationReason?: string | null;
   lockReason: string | null;
   mainAhead: number | null;
+  mainBehind: number | null;
+  /** Lines the branch changes since it left the default branch, or null when Worktrunk didn't say. */
+  mainDiff: LineCounts | null;
+  /** The subject line of the HEAD commit. */
+  subject: string | null;
+  /** The branch's Git description, from `git branch --edit-description`. */
+  description: string | null;
+  /** Per-branch notes set with `wt config state vars set`, or null when there are none. */
+  vars: Record<string, string> | null;
   defaultBranch: string | null;
   mainBase: string | null;
   locked: boolean;

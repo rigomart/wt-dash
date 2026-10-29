@@ -337,7 +337,8 @@ test("scans read when agent marks were set from Worktrunk's state, never from pr
       ["/one", "Review", "An agent was working here 1h ago."],
       ["/two", "Safe", "Its changes are in main (squash or rebase merge)."],
     ]);
-    expect(calls.filter((call) => call.includes("--get-regexp"))).toHaveLength(2);
+    const markReads = calls.filter((call) => call.some((arg) => arg.endsWith(".marker$")));
+    expect(markReads).toHaveLength(2);
     expect(calls.some((call) => call[0] === "lsof" || call[0] === "ps")).toBe(false);
     expect(service.getSnapshot().progress.phase).toBe("complete");
   } finally {

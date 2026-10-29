@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 import type { WorktreeRow } from "../src/core/types";
-import { agoLabel, rowsLabel, statusLabel, upstreamLabel } from "../src/ui/format";
+import {
+  agoLabel,
+  aheadLabel,
+  divergenceLabel,
+  rowsLabel,
+  statusLabel,
+  upstreamLabel,
+} from "../src/ui/format";
 import { clip, fitLine, lineWidth, middle, seg, spread, wrap } from "../src/ui/line";
 
 function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
@@ -29,6 +36,11 @@ function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
     mainState: "integrated",
     lockReason: null,
     mainAhead: null,
+    mainBehind: null,
+    mainDiff: null,
+    subject: null,
+    description: null,
+    vars: null,
     defaultBranch: "main",
     mainBase: "main",
     locked: false,
@@ -99,4 +111,19 @@ test("counts branches without a worktree apart from worktrees", () => {
   expect(rowsLabel([branch])).toBe("1 branch");
   expect(rowsLabel([row(), branch, branch], "Safe")).toBe("1 Safe worktree and 2 branches");
   expect(rowsLabel([branch, branch], "Safe")).toBe("2 Safe branches");
+});
+
+test("the work a branch carries reads as commits ahead and lines changed, leaving out what is zero or unknown", () => {
+  const ahead = row({ mainAhead: 3, mainBehind: 2, mainDiff: { added: 18, deleted: 4 } });
+  expect(aheadLabel(ahead)).toBe("3 commits ahead of main · +18 −4");
+  expect(divergenceLabel(ahead)).toBe("3 ahead of main · 2 behind · +18 −4 lines");
+  const one = row({ mainAhead: 1, mainBehind: 0, mainDiff: { added: 1, deleted: 0 } });
+  expect(aheadLabel(one)).toBe("1 commit ahead of main · +1");
+  expect(divergenceLabel(one)).toBe("1 ahead of main · +1 line");
+  const none = row({ mainAhead: 0, mainBehind: 5, mainDiff: { added: 0, deleted: 0 } });
+  expect(aheadLabel(none)).toBe("no commits beyond main");
+  expect(divergenceLabel(none)).toBe("none beyond main · 5 behind");
+  expect(aheadLabel(row({ mainAhead: 2, mainDiff: null }))).toBe("2 commits ahead of main");
+  expect(aheadLabel(row({ mainAhead: null }))).toBeNull();
+  expect(divergenceLabel(row({ mainAhead: null }))).toBeNull();
 });

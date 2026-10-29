@@ -1,5 +1,5 @@
 import { assess } from "../core/assess";
-import type { WorktreeRow } from "../core/types";
+import type { LineCounts, WorktreeRow } from "../core/types";
 
 export function plain(value: string): string {
   return value.replace(/\p{Cc}/gu, " ");
@@ -82,6 +82,38 @@ export function changesLabel(row: WorktreeRow): string {
 export function upstreamLabel(row: WorktreeRow): string {
   if (row.upstreamAhead === null) return "no tracking branch";
   return row.upstreamAhead > 0 ? `${row.upstreamAhead} commits not pushed` : "pushed";
+}
+
+/** "+18 −4", leaving out a side that is zero; empty when nothing changed or the counts are unknown. */
+export function linesLabel(diff: LineCounts | null): string {
+  if (!diff) return "";
+  return [diff.added ? `+${diff.added}` : "", diff.deleted ? `−${diff.deleted}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** The work a branch carries beyond the default branch: "3 commits ahead of main · +18"; null when unknown. */
+export function aheadLabel(row: WorktreeRow): string | null {
+  if (row.mainAhead === null) return null;
+  const base = row.defaultBranch ?? "the default branch";
+  if (!row.mainAhead) return `no commits beyond ${base}`;
+  const lines = linesLabel(row.mainDiff);
+  return `${countLabel(row.mainAhead, "commit")} ahead of ${base}${lines ? ` · ${lines}` : ""}`;
+}
+
+/** Ahead, behind and lines changed against the default branch: "3 ahead of main · 2 behind · +18 lines". */
+export function divergenceLabel(row: WorktreeRow): string | null {
+  if (row.mainAhead === null) return null;
+  const base = row.defaultBranch ?? "the default branch";
+  const lines = linesLabel(row.mainDiff);
+  const changed = row.mainDiff ? row.mainDiff.added + row.mainDiff.deleted : 0;
+  return [
+    row.mainAhead ? `${row.mainAhead} ahead of ${base}` : `none beyond ${base}`,
+    row.mainBehind ? `${row.mainBehind} behind` : "",
+    lines ? `${lines} ${changed === 1 ? "line" : "lines"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function branchOutcomeLabel(outcome: string): string {

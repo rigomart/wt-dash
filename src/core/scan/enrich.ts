@@ -1,5 +1,5 @@
 import { assess } from "../assess";
-import { readBranchCreatedAt, readComparisonBase } from "../git/refs";
+import { readBranchCreatedAt, readComparisonBase, readDescriptions } from "../git/refs";
 import type { CommandRunner, WorktreeRow } from "../types";
 import { readMarks } from "../worktrunk/list";
 import { readCreatedAt } from "./discovery";
@@ -11,8 +11,8 @@ export interface EnrichOptions {
 }
 
 /**
- * Adds what Worktrunk's JSON lacks: the comparison base, each row's creation time, and when its marker was
- * set, then assesses each row again.
+ * Adds what Worktrunk's JSON lacks: the comparison base, each row's creation time, when its marker was set
+ * and its branch description, then assesses each row again.
  */
 export async function enrichRows(
   repo: string,
@@ -23,7 +23,7 @@ export async function enrichRows(
   if (!rows.length) return rows;
   const readCreated = options.readCreated ?? readCreatedAt;
   const readBranchCreated = options.readBranchCreated ?? readBranchCreatedAt;
-  const [base, created, marks] = await Promise.all([
+  const [base, created, marks, descriptions] = await Promise.all([
     readComparisonBase(repo, rows[0]!.defaultBranch, runner, options.signal),
     Promise.all(
       rows.map((row) =>
@@ -35,6 +35,7 @@ export async function enrichRows(
       ),
     ),
     readMarks(repo, runner, options.signal),
+    readDescriptions(repo, runner, options.signal),
   ]);
   return rows.map((row, index) => {
     // Worktrunk's JSON carries the marker only for worktrees; its state in Git config has it for every branch.
@@ -46,6 +47,7 @@ export async function enrichRows(
       createdAt: created[index]!,
       marker,
       markerSetAt: mark && mark.marker === marker ? mark.setAt : null,
+      description: (row.branch && descriptions.get(row.branch)) ?? null,
     };
     const assessment = assess(enriched);
     return { ...enriched, verdict: assessment.verdict, reason: assessment.reason };

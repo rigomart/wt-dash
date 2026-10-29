@@ -108,7 +108,7 @@ test("an agent mark set after the batch's listing still skips the removal", asyn
   const runner: CommandRunner = async (_command, args) => {
     const state = worktreeState(args, fixture);
     if (state) return state;
-    if (args.includes("--get-regexp")) {
+    if (args.some((arg) => arg.endsWith(".marker$"))) {
       if (++reads > readsByPreviewAndBatchListing)
         marks["feature/name"] = { marker: "🤖", setAt: Date.now() };
       return commandResult(markConfig(marks));
