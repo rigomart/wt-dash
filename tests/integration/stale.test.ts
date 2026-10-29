@@ -205,23 +205,20 @@ test('removed and recreated at the same path, after the preview: skipped as "it 
   expect(await tip(repo, "target")).not.toBeNull();
 });
 
-// Fails until recheckWorktree's stateStamp includes the worktree's creation time (#22).
-test.failing(
-  'removed and recreated at the same path, after the batch listed the repo: skipped as "it changed" (#22)',
-  async () => {
-    const repo = await sandbox.repo("recreated-listed");
-    const built = await repo.squashMergedWorktree("target");
-    const { recorder, rows, result } = await confirmAround(
-      repo,
-      built,
-      "after the batch listed the repo",
-      () => recreate(repo, built),
-    );
-    expect(result.items).toEqual(skipped(rows[0]!, CHANGED));
-    expect(recorder.count(named("wt", "remove"))).toBe(0);
-    expect(await exists(built.path!)).toBe(true);
-  },
-);
+test('removed and recreated at the same path, after the batch listed the repo: skipped as "it changed" (#22)', async () => {
+  const repo = await sandbox.repo("recreated-listed");
+  const built = await repo.squashMergedWorktree("target");
+  const { recorder, rows, result } = await confirmAround(
+    repo,
+    built,
+    "after the batch listed the repo",
+    () => recreate(repo, built),
+  );
+  expect(result.items).toEqual(skipped(rows[0]!, CHANGED));
+  expect(recorder.count(named("wt", "remove"))).toBe(0);
+  expect(await exists(built.path!)).toBe(true);
+  expect(await tip(repo, "target")).not.toBeNull();
+});
 
 type MergeTiming = "after the preview" | "while an earlier removal in the batch runs";
 

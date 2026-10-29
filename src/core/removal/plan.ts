@@ -29,9 +29,12 @@ export function stamp(row: WorktreeRow): string {
     agentActive,
   ]);
 }
-export function stateStamp(state: Omit<WorktreeState, "path">): string {
+export function stateStamp(
+  state: Omit<WorktreeState, "path"> & Pick<WorktreeRow, "createdAt">,
+): string {
   return JSON.stringify([
     state.headSha,
+    state.createdAt,
     state.branch,
     state.locked,
     state.lockReason,

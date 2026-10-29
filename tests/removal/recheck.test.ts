@@ -320,6 +320,38 @@ test("a worktree created again at the same path after the preview is skipped", a
   }
 });
 
+test("a worktree created again at the same path after the repo's removals start is skipped, and unknown birth times are not a change (#22)", async () => {
+  const payload = threeWorktrees();
+  const [target, first, last] = parseWorktrunk(repo, JSON.stringify(payload));
+  const created: Record<string, string> = { [target!.path!]: "2026-09-27T00:00:00Z" };
+  const { calls, runner } = fakeRepos({
+    payloads: { [repo]: payload },
+    onRemove: (path) => {
+      if (path === first!.path) created[target!.path!] = new Date().toISOString();
+    },
+  });
+  const actions = createActionService({
+    wtPath: "/wt",
+    runner,
+    logPath: "/dev/null",
+    readCreated: async (path) => created[path] ?? null,
+  });
+  const input = [first!, { ...target!, createdAt: created[target!.path!]! }, last!];
+  const plan = await actions.prepareRemoval(input);
+  expect(plan.entries.map((entry) => entry.blockedReason)).toEqual([null, null, null]);
+  const result = await actions.executeRemoval(
+    plan,
+    Object.fromEntries(input.map((row) => [row.id, { include: true }])),
+  );
+  expect(result.items).toEqual([
+    { id: first!.id, status: "removed", branchOutcome: "deleted" },
+    { id: target!.id, status: "skipped", error: "it changed; refresh and preview again" },
+    { id: last!.id, status: "removed", branchOutcome: "deleted" },
+  ]);
+  expect(removed(calls)).toEqual([first!.path!, last!.path!]);
+  expect(wtLists(calls, repo)).toBe(2);
+});
+
 test.each<[string, (payload: any, tips: Record<string, string | null>) => void, string]>([
   [
     "moved",
