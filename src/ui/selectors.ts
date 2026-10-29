@@ -1,4 +1,4 @@
-import { awaitsSize, groupByRepo, selectRows } from "../core/view";
+import { groupByRepo, isSizing, selectRows } from "../core/view";
 import type { DashboardSnapshot, Verdict, WorktreeRow } from "../core/types";
 import {
   ALL_PROJECTS,
@@ -38,7 +38,7 @@ export interface Project {
   counts: Record<Verdict, number>;
   totalKiB: number;
   safeKiB: number;
-  /** Worktrees still waiting for a size. */
+  /** Worktrees whose size is being measured and not known yet. */
   unsized: number;
   linked: number | null;
   pending: boolean;
@@ -61,6 +61,7 @@ function projectPaths(snapshot: DashboardSnapshot): string[] {
 }
 
 function summarize(
+  snapshot: DashboardSnapshot,
   repoPath: string,
   name: string,
   rows: WorktreeRow[],
@@ -75,7 +76,7 @@ function summarize(
     counts[row.verdict]++;
     if (row.kind === "branch") continue;
     worktrees++;
-    if (awaitsSize(row)) unsized++;
+    if (isSizing(snapshot, row)) unsized++;
     totalKiB += row.sizeKiB ?? 0;
     if (row.verdict === "Safe") safeKiB += row.sizeKiB ?? 0;
   }
@@ -90,7 +91,7 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
     .map((repoPath): Project => {
       const own = rows.filter((row) => row.repoPath === repoPath);
       const error = snapshot.errors[repoPath] ?? null;
-      return summarize(repoPath, own[0]?.repoName ?? repoName(repoPath), own, {
+      return summarize(snapshot, repoPath, own[0]?.repoName ?? repoName(repoPath), own, {
         linked: linked.get(repoPath) ?? null,
         pending: !listed.has(repoPath) && !error && snapshot.progress.phase === "scanning",
         error,
@@ -103,7 +104,7 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
         a.repoPath.localeCompare(b.repoPath),
     );
   const shown = new Set(projects.map((project) => project.repoPath));
-  const all = summarize(ALL_PROJECTS, "All projects", rows, {
+  const all = summarize(snapshot, ALL_PROJECTS, "All projects", rows, {
     linked: projects.reduce((sum, project) => sum + worktreeCount(project), 0),
     pending: projects.some((project) => project.pending),
     error: null,

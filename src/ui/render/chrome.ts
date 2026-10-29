@@ -1,5 +1,5 @@
 import type { DashboardSnapshot, Verdict, WorktreeRow } from "../../core/types";
-import { awaitsSize } from "../../core/view";
+import { isSizing } from "../../core/view";
 import { branchLabel, clockLabel, countLabel, rowsLabel, sizeLabel } from "../format";
 import { fitLine, lineWidth, rule, seg, spread, textWidth, type Line, type Style } from "../line";
 import { jobStatus, projectsReady, type ListView } from "../selectors";
@@ -74,7 +74,7 @@ export function headerLine(
   const { snapshot, theme } = ctx;
   const progress = snapshot.progress;
   const total = rows.reduce((sum, row) => sum + (row.sizeKiB ?? 0), 0);
-  const unknown = rows.filter(awaitsSize).length;
+  const unknown = rows.filter((row) => isSizing(snapshot, row)).length;
   const status: Line =
     progress.phase === "scanning"
       ? [

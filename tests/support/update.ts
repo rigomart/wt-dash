@@ -52,13 +52,14 @@ export function row(
   };
 }
 
-export function context(rows: WorktreeRow[]): Context {
+export function context(rows: WorktreeRow[], sizing: string[] = []): Context {
   const snapshot: DashboardSnapshot = {
     generation: 1,
     repos: [],
     rows,
     errors: {},
     fatalError: null,
+    sizing,
     progress: {
       phase: "complete",
       reposTotal: 1,

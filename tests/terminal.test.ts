@@ -59,6 +59,7 @@ function fakeService(
     },
     errors: {},
     fatalError: null,
+    sizing: [],
   };
   let refreshes = 0;
   const listeners = new Set<(snapshot: DashboardSnapshot) => void>();
@@ -481,6 +482,7 @@ test("the confirm dialog shows live sizes and says which are still sizing", asyn
     rows.map((selected) => entry({ ...selected, sizeKiB: null })),
   );
   const ui = await start(130, 24, [sized, unsized], actions);
+  ui.fake.update({ sizing: [unsized.path!] });
   try {
     ui.setup.mockInput.pressKey("x");
     expect(await ui.frame()).toContain("Remove 1 worktree · up to 2.0 MB?");

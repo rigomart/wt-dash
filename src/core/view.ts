@@ -1,4 +1,4 @@
-import type { ToolName, Verdict, WorktreeRow } from "./types";
+import type { DashboardSnapshot, ToolName, Verdict, WorktreeRow } from "./types";
 
 export interface ViewOptions {
   search?: string;
@@ -83,9 +83,9 @@ export function selectRows(rows: WorktreeRow[], options: ViewOptions): WorktreeR
     });
 }
 
-/** A worktree with no size yet that can still get one; a missing folder never does. */
-export function awaitsSize(row: WorktreeRow): boolean {
-  return row.kind === "worktree" && !row.prunable && row.sizeKiB === null;
+/** A worktree with no size yet whose folder is being measured; one whose measurement failed is not. */
+export function isSizing(snapshot: Pick<DashboardSnapshot, "sizing">, row: WorktreeRow): boolean {
+  return row.sizeKiB === null && row.path !== null && snapshot.sizing.includes(row.path);
 }
 
 export function groupByRepo(rows: WorktreeRow[]): RepoGroup[] {

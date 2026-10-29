@@ -21,4 +21,5 @@
 ## Traps
 
 - The strip shows `checking files…` for a moment after focus moves; wait for `nothing uncommitted` or `ignored` before reading it.
+- `SIZE` reads `… · measuring…` only while the row's `du` runs; a worktree whose `du` failed (folder gone, unreadable subfolder) reads `SIZE          not measured` (#24).
 - Long paths are cut in the middle with `…` in the strip; read the full path from `i`, which wraps it.

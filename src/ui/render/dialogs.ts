@@ -1,7 +1,7 @@
 import { recentAgentMark } from "../../core/assess";
 import type { RemovalEntry } from "../../core/removal/types";
 import type { WorktreeRow } from "../../core/types";
-import { awaitsSize } from "../../core/view";
+import { isSizing } from "../../core/view";
 import { branchLabel, countLabel, rowsLabel, sizeLabel } from "../format";
 import {
   cell,
@@ -93,7 +93,7 @@ function removeDialog(
   const { ready, blocked } = confirm;
   const sized = withLiveSizes(ready, ctx.snapshot.rows);
   const kib = sized.reduce((sum, entry) => sum + (entry.row.sizeKiB ?? 0), 0);
-  const unsized = sized.filter((entry) => awaitsSize(entry.row)).length;
+  const unsized = sized.filter((entry) => isSizing(ctx.snapshot, entry.row)).length;
   const size = [
     kib || !unsized ? `up to ${sizeLabel(kib)}` : "",
     unsized ? `${unsized} sizing` : "",

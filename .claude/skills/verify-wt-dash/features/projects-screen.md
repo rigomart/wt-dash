@@ -25,4 +25,4 @@ wt-dash opens on its projects: an "All projects" entry first, then each reposito
 ## Traps
 
 - Sizes other than `feature/assets` (12.0 MB) and `feature/bundle` (4.0 MB) are a few KB from `du` and were measured on macOS APFS; on another file system compare them with `state`/`du`, not these numbers.
-- `web › feature/gone` (Broken, folder missing) is never measured, so its size column shows `…`, but the header does not count it as `sizing` (#24). `N sizing` shows only while a worktree with a folder and no saved size is measured; a seeded scan finishes that in under a second.
+- `web › feature/gone` (Broken, folder missing) has no size, so its size column shows `…`; its `du` fails at once and the header does not count it as `sizing` (#24). `N sizing` counts worktrees with no size whose `du` is running right now, whatever the verdict: a failed `du` (folder gone, unreadable subfolder) stops counting, and `r` or `R` counts it again while it reruns. A seeded scan finishes in under a second.

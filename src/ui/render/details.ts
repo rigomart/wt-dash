@@ -1,5 +1,6 @@
 import { assess, markerNote, removalBlockReason } from "../../core/assess";
 import type { ToolName, WorktreeRow } from "../../core/types";
+import { isSizing } from "../../core/view";
 import {
   agoLabel,
   branchLabel,
@@ -249,7 +250,11 @@ export function detailLines(
       ? []
       : field(
           "SIZE",
-          `${sizeLabel(row.sizeKiB)} · ${row.sizeMeasuredAt ? `measured ${agoLabel(row.sizeMeasuredAt, now)}` : "measuring…"}`,
+          row.sizeMeasuredAt
+            ? `${sizeLabel(row.sizeKiB)} · measured ${agoLabel(row.sizeMeasuredAt, now)}`
+            : isSizing(ctx.snapshot, row)
+              ? `${sizeLabel(row.sizeKiB)} · measuring…`
+              : "not measured",
           width,
         )),
   ];
