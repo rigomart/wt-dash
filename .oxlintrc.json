@@ -2,5 +2,23 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc"],
   "categories": { "correctness": "error" },
-  "env": { "builtin": true }
+  "env": { "builtin": true },
+  "overrides": [
+    {
+      "files": ["src/core/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/ui", "**/ui/**", "@opentui/*"],
+                "message": "src/core has no terminal dependency; keep UI code in src/ui."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }
