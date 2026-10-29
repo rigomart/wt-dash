@@ -121,24 +121,39 @@ test("removing an unmerged worktree with D (forceDeleteBranch) deletes its branc
   ]);
 });
 
-// Fails until branchWillBeRetained counts "behind" with reason "ancestor" as merged (#23).
-test.failing(
-  "a dirty worktree's branch that main moved past is previewed as deleted, as Worktrunk deletes it (#23)",
-  async () => {
-    const repo = await sandbox.repo("behind");
-    const built = await repo.dirtyWorktree("behind");
-    await writeFile(join(repo.path, "later.txt"), "later\n");
-    await repo.git("add", "later.txt");
-    await repo.git("commit", "-q", "-m", "Main moves on");
-    const { dashboard, actions } = await sandbox.services();
-    const shown = row(await scan(dashboard, repo), built);
-    expect([shown.mainState, shown.integrationReason]).toEqual(["behind", "ancestor"]);
-    const plan = await actions.prepareRemoval([shown]);
-    const result = await actions.executeRemoval(plan, {
-      [shown.id]: { include: true, discardChanges: true },
-    });
-    expect(result.items).toEqual([{ id: shown.id, status: "removed", branchOutcome: "deleted" }]);
-    expect(await tip(repo, "behind")).toBeNull();
-    expect(plan.entries[0]!.branchWillBeRetained).toBe(false);
-  },
-);
+test("a dirty worktree's branch that main moved past is previewed as deleted, as Worktrunk deletes it (#23)", async () => {
+  const repo = await sandbox.repo("behind");
+  const built = await repo.dirtyWorktree("behind");
+  await writeFile(join(repo.path, "later.txt"), "later\n");
+  await repo.git("add", "later.txt");
+  await repo.git("commit", "-q", "-m", "Main moves on");
+  const { dashboard, actions } = await sandbox.services();
+  const shown = row(await scan(dashboard, repo), built);
+  expect([shown.mainState, shown.integrationReason]).toEqual(["behind", "ancestor"]);
+  const plan = await actions.prepareRemoval([shown]);
+  const result = await actions.executeRemoval(plan, {
+    [shown.id]: { include: true, discardChanges: true },
+  });
+  expect(result.items).toEqual([{ id: shown.id, status: "removed", branchOutcome: "deleted" }]);
+  expect(await tip(repo, "behind")).toBeNull();
+  expect(plan.entries[0]!.branchWillBeRetained).toBe(false);
+});
+
+test("a dirty worktree's squash-merged branch is previewed as deleted, as Worktrunk deletes it (#23)", async () => {
+  const repo = await sandbox.repo("squashed-dirty");
+  const built = await repo.squashMergedWorktree("squashed");
+  await writeFile(join(built.path!, "draft.txt"), "draft\n");
+  await writeFile(join(repo.path, "later.txt"), "later\n");
+  await repo.git("add", "later.txt");
+  await repo.git("commit", "-q", "-m", "Main moves on");
+  const { dashboard, actions } = await sandbox.services();
+  const shown = row(await scan(dashboard, repo), built);
+  expect([shown.mainState, shown.integrationReason]).toEqual(["diverged", "merge_adds_nothing"]);
+  const plan = await actions.prepareRemoval([shown]);
+  expect(plan.entries[0]!.branchWillBeRetained).toBe(false);
+  const result = await actions.executeRemoval(plan, {
+    [shown.id]: { include: true, discardChanges: true },
+  });
+  expect(result.items).toEqual([{ id: shown.id, status: "removed", branchOutcome: "deleted" }]);
+  expect(await tip(repo, "squashed")).toBeNull();
+});

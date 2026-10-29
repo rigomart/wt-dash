@@ -254,3 +254,39 @@ test.skipIf(!backdates)(
     }),
   TEST_TIMEOUT,
 );
+
+for (const width of [120, 80]) {
+  test(
+    `#23 at ${width} columns: the dialog says a dirty worktree's branch that main moved past is deleted, and y deletes it`,
+    () =>
+      inSandbox(async (sandbox) => {
+        const repo = await sandbox.repo("alpha");
+        const built = await repo.dirtyWorktree("behind");
+        await repo.git("commit", "-q", "--allow-empty", "-m", "Main moves on");
+        await withApp(sandbox, { width, name: "#23" }, async (app) => {
+          await app.settled();
+          await app.press(width >= 100 ? "right" : "enter");
+          await app.waitFor("space select  enter remove");
+          await app.focus("behind");
+          await app.press("x");
+          let frame = await app.waitFor("╭─ Remove");
+          expect(dialog(frame)).toContain("! Discards uncommitted changes in behind");
+          expect(dialog(frame)).toContain("Merged branches are deleted.");
+          expect(dialog(frame)).not.toContain("unmerged");
+          await app.press("y");
+          frame = await app.waitFor(/[✓!✗] (Removed|Removal)/);
+          expect(frame).toContain("✓ Removed 1 worktree");
+          expect(await exists(built.path!)).toBe(false);
+          expect(await repo.git("branch", "--list", "behind")).toBe("");
+          expect(
+            (await removals(sandbox)).map(({ branch, flags, branchOutcome }) => ({
+              branch,
+              flags,
+              branchOutcome,
+            })),
+          ).toEqual([{ branch: "behind", flags: ["-f", "--reap"], branchOutcome: "deleted" }]);
+        });
+      }),
+    TEST_TIMEOUT,
+  );
+}

@@ -17,6 +17,7 @@ import {
   repoB,
   twoRepoRunner,
 } from "./helpers";
+import { matchListing } from "../../src/core/removal/plan";
 import { createActionService } from "../../src/core/removal/service";
 import type { CommandRunner } from "../../src/core/types";
 
@@ -207,3 +208,17 @@ test("a young worktree with no new commits is previewed as Review and removed on
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test.each([
+  ["behind", "ancestor", false],
+  ["diverged", "merge_adds_nothing", false],
+  ["same_commit", "same_commit", false],
+  ["behind", null, true],
+  ["ahead", null, true],
+] as const)(
+  "#23: a branch %s with integration reason %p is previewed as retained: %p",
+  (mainState, integrationReason, retained) => {
+    const row = { ...branchRow, mainState, integrationReason };
+    expect(matchListing(row, [row]).branchWillBeRetained).toBe(retained);
+  },
+);
