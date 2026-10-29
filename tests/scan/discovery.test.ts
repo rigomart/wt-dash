@@ -43,13 +43,25 @@ test("reads linked worktrees and their folders from Git's records without runnin
   roots.push(root);
   await mkdir(join(root, "busy", ".git", "worktrees", "one"), { recursive: true });
   await mkdir(join(root, "busy", ".git", "worktrees", "two"), { recursive: true });
+  await mkdir(join(root, "busy", ".git", "worktrees", "three"), { recursive: true });
   await writeFile(join(root, "busy", ".git", "worktrees", "one", "gitdir"), "/trees/one/.git\n");
+  // worktree.useRelativePaths writes the path against the record's folder.
+  await writeFile(
+    join(root, "busy", ".git", "worktrees", "three", "gitdir"),
+    "../../../../trees/three/.git\n",
+  );
   await mkdir(join(root, "quiet", ".git"), { recursive: true });
-  expect(await readLinkedWorktrees(join(root, "busy"))).toEqual({
-    count: 2,
-    paths: ["/trees/one"],
+  const busy = await readLinkedWorktrees(join(root, "busy"));
+  expect({ ...busy, paths: busy?.paths.sort() }).toEqual({
+    count: 3,
+    paths: ["/trees/one", join(root, "trees", "three")].sort(),
+    unread: ["two"],
   });
-  expect(await readLinkedWorktrees(join(root, "quiet"))).toEqual({ count: 0, paths: [] });
+  expect(await readLinkedWorktrees(join(root, "quiet"))).toEqual({
+    count: 0,
+    paths: [],
+    unread: [],
+  });
 });
 
 test("a worktree's creation time is its Git folder's birth time, which later Git writes leave alone", async () => {

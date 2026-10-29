@@ -1,4 +1,4 @@
-export type Verdict = "Busy" | "Broken" | "Review" | "Safe";
+export type Verdict = "Busy" | "Broken" | "Orphaned" | "Review" | "Safe";
 export type ToolName = "Claude" | "Codex" | "t3" | "Other";
 
 export interface ChangeFlags {
@@ -15,8 +15,24 @@ export interface LineCounts {
   deleted: number;
 }
 
-/** A linked worktree, or a local branch left behind without one. */
-export type RowKind = "worktree" | "branch";
+/**
+ * A linked worktree, a local branch left behind without one, or an orphan: a folder in an agent's
+ * worktree location that no repository knows.
+ */
+export type RowKind = "worktree" | "branch" | "orphan";
+
+/** The `repoPath` of every orphan row. Real repo paths are absolute, so it cannot collide with one. */
+export const ORPHANS = "orphans";
+
+/** Why no repository knows an orphan folder. */
+export type OrphanCause =
+  /**
+   * Its `.git` file names a Git record that no longer exists. `repo` is the repository that held the record,
+   * or null when the record's path doesn't say; `repoExists` is whether that repository's folder still exists.
+   */
+  | { kind: "gitdirMissing"; gitdir: string; repo: string | null; repoExists: boolean }
+  /** A Codex `<id>` folder holding only `.codex-worktree-name`, with no worktree inside. */
+  | { kind: "emptyShell" };
 
 export interface WorktreeFacts {
   id: string;
@@ -58,6 +74,8 @@ export interface WorktreeFacts {
   locked: boolean;
   prunable: boolean;
   operation: string | null;
+  /** Set only on an orphan row. */
+  orphan?: OrphanCause;
 }
 
 export interface WorktreeRow extends WorktreeFacts {

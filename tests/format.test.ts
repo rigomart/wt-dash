@@ -3,12 +3,15 @@ import type { WorktreeRow } from "../src/core/types";
 import {
   agoLabel,
   aheadLabel,
+  branchLabel,
   divergenceLabel,
+  homeText,
   rowsLabel,
   statusLabel,
   upstreamLabel,
 } from "../src/ui/format";
 import { clip, fitLine, lineWidth, middle, seg, spread, wrap } from "../src/ui/line";
+import { orphan } from "./support/update";
 
 function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
   return {
@@ -111,6 +114,31 @@ test("counts branches without a worktree apart from worktrees", () => {
   expect(rowsLabel([branch])).toBe("1 branch");
   expect(rowsLabel([row(), branch, branch], "Safe")).toBe("1 Safe worktree and 2 branches");
   expect(rowsLabel([branch, branch], "Safe")).toBe("2 Safe branches");
+});
+
+test("counts orphans as orphaned folders, apart from worktrees and branches", () => {
+  const branch = row({ kind: "branch", path: null });
+  expect(rowsLabel([orphan("x", 10)])).toBe("1 orphaned folder");
+  expect(rowsLabel([row(), row(), orphan("x", 10)])).toBe("2 worktrees and 1 orphaned folder");
+  expect(rowsLabel([row(), branch, orphan("x", 10), orphan("y", 10)])).toBe(
+    "1 worktree, 1 branch and 2 orphaned folders",
+  );
+  expect(rowsLabel([row(), orphan("x", 10)], "Safe")).toBe("1 Safe worktree and 1 orphaned folder");
+});
+
+test("an orphan is named by its folder, and its reason shortens the home folder to ~", () => {
+  expect(branchLabel(orphan("abcd", 10))).toBe("abcd/app");
+  expect(branchLabel(orphan("abcd", 10, { path: "/home/me/.codex/worktrees/abcd" }))).toBe("abcd");
+  expect(statusLabel(orphan("abcd", 10))).toBe("repository gone");
+  expect(homeText("Its repository at /home/me/old/app no longer exists.", "/home/me")).toBe(
+    "Its repository at ~/old/app no longer exists.",
+  );
+  expect(homeText("Its repository at /home/meg/app no longer exists.", "/home/me")).toBe(
+    "Its repository at /home/meg/app no longer exists.",
+  );
+  expect(homeText("Codex left this folder behind with no worktree inside.", "")).toBe(
+    "Codex left this folder behind with no worktree inside.",
+  );
 });
 
 test("the work a branch carries reads as commits ahead and lines changed, leaving out what is zero or unknown", () => {

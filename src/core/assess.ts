@@ -1,4 +1,4 @@
-import type { Verdict, WorktreeFacts } from "./types";
+import type { OrphanCause, Verdict, WorktreeFacts } from "./types";
 
 export interface Assessment {
   /** A few words for the STATUS column. */
@@ -85,6 +85,10 @@ function assessGit(facts: WorktreeFacts, now: number): Assessment {
   const unknown = (reason: string) =>
     result("status unknown", "Review", reason, "its Git status is unknown; press r to rescan");
 
+  if (facts.kind === "orphan")
+    return facts.orphan
+      ? assessOrphan(facts.orphan)
+      : unknown("Why no repository knows this folder wasn't recorded.");
   if (
     !facts.repoPath.startsWith("/") ||
     (facts.kind === "worktree" && !facts.path?.startsWith("/"))
@@ -211,6 +215,22 @@ function assessGit(facts: WorktreeFacts, now: number): Assessment {
     default:
       return unknown(`Couldn't compare it with ${base}.`);
   }
+}
+
+function assessOrphan(cause: OrphanCause): Assessment {
+  const orphaned = (status: string, reason: string): Assessment => ({
+    status,
+    verdict: "Orphaned",
+    reason,
+    removalBlockReason: null,
+  });
+  if (cause.kind === "emptyShell")
+    return orphaned("no worktree inside", "Codex left this folder behind with no worktree inside.");
+  if (cause.repo === null)
+    return orphaned("Git record gone", `Its Git record at ${cause.gitdir} no longer exists.`);
+  return cause.repoExists
+    ? orphaned("unknown to its repo", `Its repository at ${cause.repo} no longer lists it.`)
+    : orphaned("repository gone", `Its repository at ${cause.repo} no longer exists.`);
 }
 
 export function removalBlockReason(row: WorktreeFacts): string | null {

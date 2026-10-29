@@ -9,6 +9,7 @@ import {
   countLabel,
   divergenceLabel,
   homePath,
+  homeText,
   plain,
   porcelainPath,
   sizeLabel,
@@ -70,25 +71,35 @@ export function worktreeSummary(
   const color = verdictColor(theme, row.verdict);
   const changes = changesLabel(row);
   const commit = `last commit ${agoLabel(row.committedAt, now)}${row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""}`;
-  const lines: Line[] = [
-    [
-      seg(branchLabel(row), { bold: true }),
-      dim(state.screen.kind === "all" ? ` · ${row.repoName}  ` : "  "),
-      seg(`● ${row.verdict} · ${statusLabel(row)}`, { fg: color }),
-    ],
-    row.path === null
-      ? [dim(`Branch without a worktree · created ${agoLabel(row.createdAt, now)}`)]
-      : [dim(middle(homePath(row.path, home), width))],
-    ...workLine(row, width),
-    ...notesLine(row, width),
-    row.path === null
-      ? [dim(`${commit} · ${upstreamLabel(row)}`)]
-      : [
-          dim(`${TOOL_NAMES[row.tool]} · ${commit} · `),
-          seg(changes, { fg: changes === "clean" ? theme.safe : theme.review }),
-          dim(` · ${upstreamLabel(row)}`),
-        ],
+  const heading: Line = [
+    seg(branchLabel(row), { bold: true }),
+    dim(state.screen.kind === "all" && row.kind !== "orphan" ? ` · ${row.repoName}  ` : "  "),
+    seg(`● ${row.verdict} · ${statusLabel(row)}`, { fg: color }),
   ];
+  // An orphan has no Git state to show, only where it is, why no repository knows it, and its size.
+  const lines: Line[] =
+    row.kind === "orphan"
+      ? [
+          heading,
+          [dim(middle(homePath(row.path ?? "", home), width))],
+          [seg(clip(homeText(assess(row).reason, home), width))],
+          [dim(clip(`${TOOL_NAMES[row.tool]} · ${sizeText(row, ctx)}`, width))],
+        ]
+      : [
+          heading,
+          row.path === null
+            ? [dim(`Branch without a worktree · created ${agoLabel(row.createdAt, now)}`)]
+            : [dim(middle(homePath(row.path, home), width))],
+          ...workLine(row, width),
+          ...notesLine(row, width),
+          row.path === null
+            ? [dim(`${commit} · ${upstreamLabel(row)}`)]
+            : [
+                dim(`${TOOL_NAMES[row.tool]} · ${commit} · `),
+                seg(changes, { fg: changes === "clean" ? theme.safe : theme.review }),
+                dim(` · ${upstreamLabel(row)}`),
+              ],
+        ];
   const failure = state.failures[row.id];
   if (failure)
     lines.push([seg(clip(`Last removal failed: ${failure}`, width), { fg: theme.broken })]);
@@ -241,12 +252,14 @@ export function detailLines(
   if (!row) return [[dim("No worktree in view")]];
   const assessment = assess(row);
   const color = verdictColor(theme, row.verdict);
+  // An orphan has no repository or Git state, so it shows only its folder, maker and size.
+  const git = row.kind !== "orphan";
   const lines: Line[] = [
-    ...wrap(`${row.repoName} / ${branchLabel(row)}`, width).map((text) => [
+    ...wrap(git ? `${row.repoName} / ${branchLabel(row)}` : branchLabel(row), width).map((text) => [
       seg(text, { bold: true }),
     ]),
     [seg("● ", { fg: color }), seg(`${row.verdict} · ${statusLabel(row)}`, { fg: color })],
-    ...wrap(assessment.reason, width - 2).map((text) => [dim(`  ${text}`)]),
+    ...wrap(homeText(assessment.reason, ctx.home), width - 2).map((text) => [dim(`  ${text}`)]),
     [],
     [dim("PATH")],
     ...(row.path === null
@@ -265,35 +278,27 @@ export function detailLines(
       field(index ? "" : "VARS", `${key}: ${value}`, width),
     ),
     ...optionalField("COMMITS", divergenceLabel(row), width),
-    ...field(
-      "LAST COMMIT",
-      agoLabel(row.committedAt, now) + (row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""),
-      width,
-    ),
+    ...(git
+      ? field(
+          "LAST COMMIT",
+          agoLabel(row.committedAt, now) + (row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""),
+          width,
+        )
+      : []),
     ...optionalField("MESSAGE", row.subject && plain(row.subject), width),
-    ...(row.path === null
-      ? []
-      : field(
+    ...(row.kind === "worktree"
+      ? field(
           "CHANGES",
           changesLabel(row),
           width,
           changesLabel(row) === "clean" ? { fg: theme.safe } : { fg: theme.review },
-        )),
-    ...field("UPSTREAM", upstreamLabel(row), width),
+        )
+      : []),
+    ...(git ? field("UPSTREAM", upstreamLabel(row), width) : []),
     ...(row.locked && assessment.status !== "locked"
       ? field("LOCK", row.lockReason ?? "no lock reason supplied", width)
       : []),
-    ...(row.path === null
-      ? []
-      : field(
-          "SIZE",
-          row.sizeMeasuredAt
-            ? `${sizeLabel(row.sizeKiB)} · measured ${agoLabel(row.sizeMeasuredAt, now)}`
-            : isSizing(ctx.snapshot, row)
-              ? `${sizeLabel(row.sizeKiB)} · measuring…`
-              : "not measured",
-          width,
-        )),
+    ...(row.path === null ? [] : field("SIZE", sizeText(row, ctx), width)),
   ];
   const mark = markerNote(row, now);
   if (mark) lines.push(...field("MARK", mark, width));
@@ -306,6 +311,12 @@ export function detailLines(
   else if (status) lines.push(...field("REMOVAL", status.label, width, status.style), []);
   lines.push(...actionLines(row, state, ctx, width, canExpand));
   return lines;
+}
+
+function sizeText(row: WorktreeRow, ctx: RenderContext): string {
+  if (row.sizeMeasuredAt)
+    return `${sizeLabel(row.sizeKiB)} · measured ${agoLabel(row.sizeMeasuredAt, ctx.now)}`;
+  return isSizing(ctx.snapshot, row) ? `${sizeLabel(row.sizeKiB)} · measuring…` : "not measured";
 }
 
 function expandHint(state: UiState, canExpand: boolean): Array<[string, string]> {

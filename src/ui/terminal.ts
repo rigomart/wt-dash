@@ -153,11 +153,12 @@ export async function runTerminal(
     }
   }
 
-  // Loads the focused row's file breakdown for the details pane once focus rests on it.
+  // Loads the focused worktree's file breakdown for the details pane once focus rests on it. Never an orphan's:
+  // Git run in a folder no repository knows can walk up into a parent repository.
   function scheduleInspect(): void {
     if (!actions) return;
     const row = listView(state, snapshot).focus;
-    if (!row || row.kind === "branch" || state.files[row.id]) return;
+    if (!row || row.kind !== "worktree" || state.files[row.id]) return;
     if (inspectTimer) clearTimeout(inspectTimer);
     const generation = state.generation;
     inspectTimer = setTimeout(() => {

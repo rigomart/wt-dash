@@ -1,8 +1,9 @@
 import { dryPrune, pruneNow } from "../git/worktrees";
-import type { CommandRunner } from "../types";
+import { ORPHANS, type CommandRunner } from "../types";
 import type { PrunePlan } from "./types";
 
 export async function previewPrune(repoPath: string, runner: CommandRunner): Promise<PrunePlan> {
+  if (repoPath === ORPHANS) throw new Error("Orphaned folders have no Git records to prune");
   return { repoPath, records: await dryPrune(repoPath, runner) };
 }
 

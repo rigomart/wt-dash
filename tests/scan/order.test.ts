@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { listingOrder } from "../../src/core/scan/order";
 
 test("repos are listed most worktrees first, with the one that took the most space last time second", () => {
-  const linked = (count: number, paths: string[] = []) => ({ count, paths });
+  const linked = (count: number, paths: string[] = []) => ({ count, paths, unread: [] });
   const sizes: Record<string, number> = { "/trees/h1": 900, "/trees/h2": 900, "/trees/b1": 50 };
   const { order, first } = listingOrder(
     [

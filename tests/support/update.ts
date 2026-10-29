@@ -1,5 +1,5 @@
 import type { RemovalEntry } from "../../src/core/removal/types";
-import type { DashboardSnapshot, WorktreeRow } from "../../src/core/types";
+import { ORPHANS, type DashboardSnapshot, type WorktreeRow } from "../../src/core/types";
 import {
   initialState,
   type Context,
@@ -120,5 +120,34 @@ export const beta = (id: string, sizeKiB: number, overrides: Partial<WorktreeRow
     repoName: "beta",
     repoPath: "/repos/beta",
     path: `/repos/beta/worktrees/${id}`,
+    ...overrides,
+  });
+
+/** A worktree folder under `/home/me/.codex/worktrees` whose repository at `/home/me/old/<id>` is gone. */
+export const orphan = (id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}) =>
+  row(id, sizeKiB, {
+    id: `${ORPHANS}\0${id}`,
+    kind: "orphan",
+    repoPath: ORPHANS,
+    repoName: "Orphaned folders",
+    path: `/home/me/.codex/worktrees/${id}/app`,
+    tool: "Codex",
+    branch: null,
+    headSha: null,
+    committedAt: null,
+    createdAt: null,
+    changes: null,
+    upstreamAhead: null,
+    mainState: null,
+    defaultBranch: null,
+    mainBase: null,
+    verdict: "Orphaned",
+    reason: `Its repository at /home/me/old/${id} no longer exists.`,
+    orphan: {
+      kind: "gitdirMissing",
+      gitdir: `/home/me/old/${id}/.git/worktrees/app`,
+      repo: `/home/me/old/${id}`,
+      repoExists: false,
+    },
     ...overrides,
   });

@@ -1,6 +1,6 @@
 # Filter, search and sort
 
-In a worktree list, 1–5 show All, Safe, Review, Busy or Broken; `/` searches by repo, branch, tool or path as you type; `s` cycles the sort and `S` reverses it; `v` groups "All projects" by repo instead of verdict. Esc steps back one thing at a time.
+In a worktree list, 1–6 show All, Safe, Review, Busy, Broken or Orphaned; `/` searches by repo, branch, tool or path as you type; `s` cycles the sort and `S` reverses it; `v` groups "All projects" by repo instead of verdict. Esc steps back one thing at a time.
 
 ## Entry points and variants
 
@@ -13,7 +13,7 @@ In a worktree list, 1–5 show All, Safe, Review, Busy or Broken; `/` searches b
 ## Checks
 
 1. In `api`, `3` leaves only `? REVIEW  4 worktrees and 1 branch`; `5` shows `No Broken worktrees. Press 1 to see all.`; `1` shows every section again.
-2. `/` opens the search: line 2 ends with `/    9 of 18` (rows in view of all rows). Typing `spike` (send it with `send-keys -l`) leaves one row, `leftover/spike`, the tabs read `All 1  Safe 0  Review 1  Busy 0  Broken 0`, and line 2 ends `/ spike   1 of 18`.
+2. `/` opens the search: line 2 ends with `/    9 of 18` (rows in view of all rows). Typing `spike` (send it with `send-keys -l`) leaves one row, `leftover/spike`, the tabs read `All 1  Safe 0  Review 1  Busy 0  Broken 0  Orphaned 0`, and line 2 ends `/ spike   1 of 18`.
 3. Enter keeps the search: line 2 ends with `/ spike  esc clears`. Esc alone clears it: line 2 ends with `/ search` and the tabs are back to `All 9`.
 4. `s` cycles the footer label `s sort: size ↓` → `s sort: age ↓` → `s sort: repo ↑` → `s sort: size ↓`; `S` turns `size ↓` into `size ↑`.
 5. With `size ↓` on "All projects", the Safe section starts `feature/assets` (12.0 MB) then `feature/bundle` (4.0 MB); with `size ↑` it starts `docs/typos`, and `leftover/hotfix` (branch) stays last either way.

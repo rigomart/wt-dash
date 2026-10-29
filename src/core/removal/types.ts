@@ -18,6 +18,8 @@ export interface RemovalEntry extends FileReport {
   blockedReason: string | null;
   requiresDiscard: boolean;
   branchWillBeRetained: boolean;
+  /** An orphan folder's device and inode at the preview, so a folder swapped in at its path is not deleted. */
+  folderId?: string;
 }
 export interface RemovalPlan {
   entries: RemovalEntry[];

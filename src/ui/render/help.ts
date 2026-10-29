@@ -27,7 +27,7 @@ function helpGroups(_state: UiState): Array<[string, Array<[string, string]>]> {
     [
       "FIND",
       [
-        ["1-5", "verdict tab"],
+        ["1-6", "verdict tab"],
         ["/", "search as you type"],
         ["s S", "sort / reverse"],
         ["v", "group by repo or verdict"],
@@ -90,7 +90,8 @@ export function withHelp(base: Line[], state: UiState, ctx: RenderContext): Line
       seg("● safe  ", { fg: theme.safe }),
       seg("● review  ", { fg: theme.review }),
       seg("● busy  ", { fg: theme.busy }),
-      seg("● broken", { fg: theme.broken }),
+      seg("● broken  ", { fg: theme.broken }),
+      seg("● orphaned", { fg: theme.orphaned }),
     ],
   );
   return overlay(

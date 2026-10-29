@@ -5,6 +5,7 @@ import { failure } from "../process";
 import type { CommandRunner, WorktreeRow } from "../types";
 import { parseRemoval, runRemove } from "../worktrunk/remove";
 import { appendLog } from "./log";
+import { deleteOrphan, recheckOrphan } from "./orphan";
 import { listRepo, matchListing, verdictRefs } from "./plan";
 import { recheckBranch, recheckMark, recheckWorktree } from "./recheck";
 import type {
@@ -61,6 +62,45 @@ export async function removeBatch(
   const pruneWarnings: string[] = [];
   const succeededRepos = new Set<string>();
   const before = await diskSpace(options.runner);
+  async function log(index: number, label: string, value: object): Promise<void> {
+    try {
+      await appendLog(options.logPath, value);
+    } catch (cause) {
+      entryWarnings[index]!.push(`Could not write removal log for ${label}: ${String(cause)}`);
+    }
+  }
+  /** Rechecked on disk right before it is deleted; it never reaches Worktrunk or Git. */
+  async function removeOrphan(index: number): Promise<void> {
+    const { row, folderId } = plan.entries[index]!;
+    const blockedReason = await recheckOrphan(row, folderId);
+    if (blockedReason) {
+      items[index] = { id: row.id, status: "skipped", error: blockedReason };
+      onProgress?.(row.id, "skipped");
+      return;
+    }
+    onProgress?.(row.id, "removing");
+    let error: string | null = null;
+    try {
+      await deleteOrphan(row.path!, row.orphan!);
+      items[index] = { id: row.id, status: "removed" };
+      onProgress?.(row.id, "removed");
+    } catch (cause) {
+      error = String(cause);
+      items[index] = { id: row.id, status: "failed", error };
+      onProgress?.(row.id, "failed");
+    }
+    await log(index, row.path!, {
+      timestamp: new Date().toISOString(),
+      repo: row.orphan?.kind === "gitdirMissing" ? row.orphan.repo : null,
+      branch: null,
+      path: row.path,
+      flags: [],
+      exitCode: null,
+      branchOutcome: null,
+      orphan: true,
+      error,
+    });
+  }
   const repos = [...new Set(plan.entries.map((entry) => entry.row.repoPath))];
   for (const repo of repos) {
     const indexes = plan.entries.flatMap((entry, index) =>
@@ -96,6 +136,10 @@ export async function removeBatch(
       // Removing an unmerged branch without a worktree does nothing unless it is force-deleted.
       if (row.kind === "branch" && entry.branchWillBeRetained && !choice.forceDeleteBranch) {
         skip("Deleting the unmerged branch was not confirmed");
+        continue;
+      }
+      if (row.kind === "orphan") {
+        await removeOrphan(index);
         continue;
       }
       let blockedReason: string | null;
@@ -160,21 +204,17 @@ export async function removeBatch(
           if (row.kind === "worktree") succeededRepos.add(row.repoPath);
         }
       }
-      try {
-        await appendLog(options.logPath, {
-          timestamp: new Date().toISOString(),
-          repo: row.repoPath,
-          branch: row.branch,
-          path: row.path,
-          flags,
-          exitCode,
-          branchOutcome: branchOutcome ?? null,
-          ...(pruned === undefined ? {} : { pruned }),
-          error: error ?? null,
-        });
-      } catch (cause) {
-        warnings.push(`Could not write removal log for ${label}: ${String(cause)}`);
-      }
+      await log(index, label, {
+        timestamp: new Date().toISOString(),
+        repo: row.repoPath,
+        branch: row.branch,
+        path: row.path,
+        flags,
+        exitCode,
+        branchOutcome: branchOutcome ?? null,
+        ...(pruned === undefined ? {} : { pruned }),
+        error: error ?? null,
+      });
     }
   }
   for (const repo of succeededRepos) {

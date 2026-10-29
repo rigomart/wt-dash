@@ -3,6 +3,7 @@ import { createActionService } from "./core/removal/service";
 import type { ActionService } from "./core/removal/types";
 import { createDashboardService } from "./core/scan/dashboard";
 import { discoverRepos } from "./core/scan/discovery";
+import { findOrphans } from "./core/scan/orphans";
 import { createSizeService } from "./core/sizes";
 import type { CommandRunner, DashboardService, SizeService } from "./core/types";
 
@@ -36,6 +37,7 @@ export async function createServices(options: {
         ...new Set((await Promise.all(roots.map((root) => discoverRepos(root, depth + 1)))).flat()),
       ].sort(),
     readCreated,
+    findOrphans: (repos) => findOrphans(home, repos),
   });
   const actions = createActionService({
     wtPath,

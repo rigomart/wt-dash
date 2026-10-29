@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { assess, markerNote, MIN_AGE_MS } from "../src/core/assess";
+import { orphanRow } from "../src/core/scan/orphans";
 import { parseWorktrunk } from "../src/core/worktrunk/list";
 import fixture from "./fixtures/list-v2.json";
-import type { ChangeFlags, WorktreeFacts } from "../src/core/types";
+import type { ChangeFlags, OrphanCause, WorktreeFacts } from "../src/core/types";
 
 const base = {
   ...parseWorktrunk("/repo", JSON.stringify(fixture))[0]!,
@@ -307,4 +308,43 @@ describe("verdict precedence", () => {
     expect(assess(cleanFacts).verdict).toBe("Safe");
     expect(assess({ ...cleanFacts, mainState: "empty" }).verdict).toBe("Safe");
   });
+});
+
+const gitdir = "/Users/me/old/app/.git/worktrees/app";
+test.each([
+  [
+    { kind: "gitdirMissing", gitdir, repo: "/Users/me/old/app", repoExists: false },
+    "repository gone",
+    "Its repository at /Users/me/old/app no longer exists.",
+  ],
+  [
+    { kind: "gitdirMissing", gitdir, repo: "/Users/me/old/app", repoExists: true },
+    "unknown to its repo",
+    "Its repository at /Users/me/old/app no longer lists it.",
+  ],
+  [
+    { kind: "gitdirMissing", gitdir: "/Users/me/records/app", repo: null, repoExists: false },
+    "Git record gone",
+    "Its Git record at /Users/me/records/app no longer exists.",
+  ],
+  [
+    { kind: "emptyShell" },
+    "no worktree inside",
+    "Codex left this folder behind with no worktree inside.",
+  ],
+] as const)("an orphan folder is Orphaned and removable: %j", (cause, status, reason) => {
+  const row = orphanRow({
+    path: "/Users/me/.codex/worktrees/abcd/app",
+    cause: cause as OrphanCause,
+  });
+  expect(assess(row)).toEqual({ status, verdict: "Orphaned", reason, removalBlockReason: null });
+  expect([row.verdict, row.reason]).toEqual(["Orphaned", reason]);
+});
+
+test("an orphan is judged by its cause alone, whatever its Git fields or agent mark say", () => {
+  const row = orphanRow({ path: "/Users/me/.codex/worktrees/abcd", cause: { kind: "emptyShell" } });
+  const now = Date.parse(base.createdAt);
+  expect(
+    assess({ ...row, prunable: true, marker: "🤖", markerSetAt: base.createdAt }, now),
+  ).toEqual(assess(row, now));
 });

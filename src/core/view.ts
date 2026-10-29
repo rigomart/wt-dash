@@ -1,4 +1,10 @@
-import type { DashboardSnapshot, ToolName, Verdict, WorktreeRow } from "./types";
+import {
+  ORPHANS,
+  type DashboardSnapshot,
+  type ToolName,
+  type Verdict,
+  type WorktreeRow,
+} from "./types";
 
 export interface ViewOptions {
   search?: string;
@@ -19,6 +25,7 @@ const verdictOrder: Record<Verdict, number> = {
   Review: 2,
   Busy: 3,
   Broken: 4,
+  Orphaned: 5,
 };
 
 function compareValues(
@@ -88,6 +95,7 @@ export function isSizing(snapshot: Pick<DashboardSnapshot, "sizing">, row: Workt
   return row.sizeKiB === null && row.path !== null && snapshot.sizing.includes(row.path);
 }
 
+/** Groups rows by repo in the order they come, with orphans, which have no repo, last. */
 export function groupByRepo(rows: WorktreeRow[]): RepoGroup[] {
   const groups = new Map<string, RepoGroup>();
   for (const row of rows) {
@@ -98,5 +106,7 @@ export function groupByRepo(rows: WorktreeRow[]): RepoGroup[] {
     }
     group.rows.push(row);
   }
-  return [...groups.values()];
+  const orphans = groups.get(ORPHANS);
+  groups.delete(ORPHANS);
+  return orphans ? [...groups.values(), orphans] : [...groups.values()];
 }

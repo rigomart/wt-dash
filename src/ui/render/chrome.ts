@@ -2,7 +2,7 @@ import type { DashboardSnapshot, Verdict, WorktreeRow } from "../../core/types";
 import { isSizing } from "../../core/view";
 import { branchLabel, clockLabel, countLabel, rowsLabel, sizeLabel } from "../format";
 import { fitLine, lineWidth, rule, seg, spread, textWidth, type Line, type Style } from "../line";
-import { jobStatus, projectsReady, type ListView } from "../selectors";
+import { jobStatus, projectsReady, repoName, type ListView } from "../selectors";
 import { TABS, VERDICTS, type Screen, type Tab, type Toast, type UiState } from "../state";
 import { verdictColor, type Theme } from "../theme";
 import { dim, key, spinner } from "./common";
@@ -88,7 +88,7 @@ export function headerLine(
           : [dim("starting…")];
   const place =
     screen.kind === "project"
-      ? (rows[0]?.repoName ?? screen.repoPath.split("/").at(-1) ?? screen.repoPath)
+      ? (rows[0]?.repoName ?? repoName(screen.repoPath))
       : screen.kind === "all"
         ? "all projects"
         : null;
@@ -123,6 +123,7 @@ export function tabsLine(state: UiState, view: ListView, ctx: RenderContext): Li
     Review: "Rev",
     Busy: "Busy",
     Broken: "Brk",
+    Orphaned: "Orph",
   };
   const tone: Record<Tab, Style> = {
     All: {},
@@ -130,15 +131,17 @@ export function tabsLine(state: UiState, view: ListView, ctx: RenderContext): Li
     Review: { fg: theme.review },
     Busy: { fg: theme.busy },
     Broken: { fg: theme.broken },
+    Orphaned: { fg: theme.orphaned },
   };
-  const left: Line = TABS.flatMap((tab) => {
-    const count = view.counts[tab];
-    let label = `${width < 64 ? short[tab] : tab} ${count}`;
-    if (tab === "Safe" && width >= 100 && view.safeKiB) label += ` · ${sizeLabel(view.safeKiB)}`;
-    const look: Style =
-      tab === state.tab ? { reverse: true, bold: true } : { ...tone[tab], dim: count === 0 };
-    return [seg(` ${label} `, look)];
-  });
+  const tabs = (shortened: boolean): Line =>
+    TABS.flatMap((tab) => {
+      const count = view.counts[tab];
+      let label = `${shortened ? short[tab] : tab} ${count}`;
+      if (tab === "Safe" && width >= 100 && view.safeKiB) label += ` · ${sizeLabel(view.safeKiB)}`;
+      const look: Style =
+        tab === state.tab ? { reverse: true, bold: true } : { ...tone[tab], dim: count === 0 };
+      return [seg(` ${label} `, look)];
+    });
   let right: Line;
   if (state.searching) {
     right = [
@@ -150,6 +153,8 @@ export function tabsLine(state: UiState, view: ListView, ctx: RenderContext): Li
   } else if (state.search) {
     right = [key(theme, "/ "), seg(state.search, { bold: true }), dim("  esc clears")];
   } else right = [key(theme, "/"), dim(" search")];
+  const full = tabs(false);
+  const left = width < 64 || lineWidth(full) + lineWidth(right) + 1 > width ? tabs(true) : full;
   return spread(left, right, width, state.searching || state.search ? "right" : "left");
 }
 

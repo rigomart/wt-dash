@@ -1,7 +1,7 @@
 import type { RGBA } from "@opentui/core";
 import { assess, removalBlockReason } from "../../core/assess";
 import type { Verdict, WorktreeRow } from "../../core/types";
-import { ageLabel, branchLabel, rowsLabel, sizeLabel, statusLabel } from "../format";
+import { ageLabel, branchLabel, homeText, rowsLabel, sizeLabel, statusLabel } from "../format";
 import { cell, clip, fitLine, middle, rule, seg, spread, textWidth, type Line } from "../line";
 import {
   isGrouped,
@@ -66,6 +66,7 @@ const SECTION_TITLES: Record<Verdict, { icon: string; gloss: string }> = {
   Review: { icon: "?", gloss: "needs a look" },
   Busy: { icon: "‖", gloss: "finish the Git operation first" },
   Broken: { icon: "✗", gloss: "folder missing; prune the record" },
+  Orphaned: { icon: "○", gloss: "no repository knows it" },
 };
 
 function sectionHeader(section: Section, state: UiState, ctx: RenderContext): Line {
@@ -145,10 +146,10 @@ function rowLine(
     }),
     seg(" "),
   );
-  if (cols.repo) parts.push(cell(row.repoName, cols.repo - 1, { dim: true }), seg(" "));
+  if (cols.repo) parts.push(cell(repoCell(row), cols.repo - 1, { dim: true }), seg(" "));
   if (cols.reason) {
     if (status) parts.push(cell(status.label, cols.reason - 1, status.style));
-    else parts.push(...reasonCell(row, cols.reason - 1, color));
+    else parts.push(...reasonCell(row, cols.reason - 1, color, ctx.home));
     parts.push(seg(" "));
   }
   if (cols.age)
@@ -157,17 +158,22 @@ function rowLine(
   return fitLine(parts, ctx.width, focused ? { bg: theme.focusBg } : undefined);
 }
 
+/** An orphan has no repository to name; its section says what it is. */
+export function repoCell(row: WorktreeRow): string {
+  return row.kind === "orphan" ? "" : row.repoName;
+}
+
 export function rowSize(row: WorktreeRow): string {
   return row.kind === "branch" ? "branch" : sizeLabel(row.sizeKiB);
 }
 
-function reasonCell(row: WorktreeRow, width: number, color: RGBA): Line {
+function reasonCell(row: WorktreeRow, width: number, color: RGBA, home: string): Line {
   const label = statusLabel(row, width);
   const assessment = assess(row);
   const reason =
     row.locked && assessment.status === "locked"
       ? (row.lockReason ?? "no reason given")
-      : assessment.reason.replace(/\.$/, "");
+      : homeText(assessment.reason, home).replace(/\.$/, "");
   const rest = width - textWidth(label) >= 16 ? clip(`  ${reason}`, width - textWidth(label)) : "";
   return [seg(label, { fg: color }), ...fitLine([dim(rest)], width - textWidth(label))];
 }
@@ -194,11 +200,8 @@ function emptyMessage(state: UiState, ctx: RenderContext): Line {
   if (!visibleRows(state, snapshot).length) return [dim("Every worktree is being removed.")];
   if (state.search && state.tab === "All")
     return [dim(`No worktrees match “${state.search}”. Esc clears the search.`)];
-  return [
-    dim(
-      `No ${state.tab} worktrees${state.search ? ` match “${state.search}”` : ""}. Press 1 to see all.`,
-    ),
-  ];
+  const none = state.tab === "Orphaned" ? "No orphaned folders" : `No ${state.tab} worktrees`;
+  return [dim(`${none}${state.search ? ` match “${state.search}”` : ""}. Press 1 to see all.`)];
 }
 
 function sectionLines(

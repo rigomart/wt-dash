@@ -1,5 +1,5 @@
 import { groupByRepo, isSizing, selectRows } from "../core/view";
-import type { DashboardSnapshot, Verdict, WorktreeRow } from "../core/types";
+import { ORPHANS, type DashboardSnapshot, type Verdict, type WorktreeRow } from "../core/types";
 import {
   ALL_PROJECTS,
   VERDICTS,
@@ -31,9 +31,9 @@ export interface ListView {
 export interface Project {
   repoPath: string;
   repoName: string;
-  /** Worktrees and branches without a worktree. */
+  /** Worktrees, branches without a worktree, and orphans. */
   rows: WorktreeRow[];
-  /** Rows that are worktrees; only these have a size. */
+  /** Rows with a folder, worktrees and orphans; only these have a size. */
   worktrees: number;
   counts: Record<Verdict, number>;
   totalKiB: number;
@@ -46,6 +46,7 @@ export interface Project {
 }
 
 export interface ProjectsView {
+  /** Every project, then the orphans' pseudo-project, if any orphan is in view. */
   projects: Project[];
   /** "All projects" followed by every project, in the order focus moves through them. */
   entries: Project[];
@@ -67,7 +68,7 @@ function summarize(
   rows: WorktreeRow[],
   rest: Pick<Project, "linked" | "pending" | "error">,
 ): Project {
-  const counts: Record<Verdict, number> = { Safe: 0, Review: 0, Busy: 0, Broken: 0 };
+  const counts: Record<Verdict, number> = { Safe: 0, Review: 0, Busy: 0, Broken: 0, Orphaned: 0 };
   let worktrees = 0;
   let totalKiB = 0;
   let safeKiB = 0;
@@ -99,6 +100,7 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
     })
     .sort(
       (a, b) =>
+        Number(a.repoPath === ORPHANS) - Number(b.repoPath === ORPHANS) ||
         worktreeCount(b) - worktreeCount(a) ||
         a.repoName.localeCompare(b.repoName) ||
         a.repoPath.localeCompare(b.repoPath),
@@ -113,22 +115,29 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
   return {
     projects,
     entries,
-    empty: snapshot.repos.filter((repo) => !shown.has(repo.path)).length,
+    empty: snapshot.repos.filter((repo) => repo.path !== ORPHANS && !shown.has(repo.path)).length,
     focus:
       entries.find((project) => project.repoPath === state.projectFocus) ?? projects[0] ?? null,
   };
+}
+
+/** Projects that are repositories, leaving out the orphans' pseudo-project. */
+export function repoCount(view: ProjectsView): number {
+  return view.projects.filter((project) => project.repoPath !== ORPHANS).length;
 }
 
 export function worktreeCount(project: Project): number {
   return project.pending ? (project.linked ?? 0) : project.worktrees;
 }
 
+/** The one repository to open directly; orphans don't count as a project here. */
 export function soleProject(snapshot: DashboardSnapshot): string | null {
-  if (snapshot.repos.length === 1) return snapshot.repos[0]!.path;
+  const repos = snapshot.repos.filter((repo) => repo.path !== ORPHANS);
+  if (repos.length === 1) return repos[0]!.path;
   const settled =
     snapshot.progress.phase === "complete" ||
-    (snapshot.repos.length > 0 && snapshot.repos.every((repo) => repo.linked !== null));
-  const paths = projectPaths(snapshot);
+    (repos.length > 0 && repos.every((repo) => repo.linked !== null));
+  const paths = projectPaths(snapshot).filter((path) => path !== ORPHANS);
   return settled && paths.length === 1 ? paths[0]! : null;
 }
 
@@ -172,6 +181,7 @@ export function listView(state: UiState, snapshot: DashboardSnapshot): ListView 
     Review: 0,
     Busy: 0,
     Broken: 0,
+    Orphaned: 0,
   };
   let safeKiB = 0;
   for (const row of matching) {
@@ -222,4 +232,5 @@ export function spinning(state: UiState, snapshot: DashboardSnapshot): boolean {
   );
 }
 
-export const repoName = (path: string) => path.split("/").at(-1) ?? path;
+export const repoName = (path: string) =>
+  path === ORPHANS ? "Orphaned folders" : (path.split("/").at(-1) ?? path);

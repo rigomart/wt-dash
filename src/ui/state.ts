@@ -8,8 +8,8 @@ import type {
 } from "../core/removal/types";
 import type { DashboardSnapshot, Verdict, WorktreeRow } from "../core/types";
 
-export type Tab = "All" | "Safe" | "Review" | "Busy" | "Broken";
-export const TABS: Tab[] = ["All", "Safe", "Review", "Busy", "Broken"];
+export type Tab = "All" | "Safe" | "Review" | "Busy" | "Broken" | "Orphaned";
+export const TABS: Tab[] = ["All", "Safe", "Review", "Busy", "Broken", "Orphaned"];
 /** Sorts rows within each section. */
 export type SortKey = "size" | "age" | "repo";
 export const SORT_KEYS: SortKey[] = ["size", "age", "repo"];
@@ -18,7 +18,7 @@ export const DESCENDING_BY_DEFAULT: Record<SortKey, boolean> = {
   age: true,
   repo: false,
 };
-export const VERDICTS: Verdict[] = ["Safe", "Review", "Busy", "Broken"];
+export const VERDICTS: Verdict[] = ["Safe", "Review", "Busy", "Broken", "Orphaned"];
 
 export type Screen = { kind: "projects" } | { kind: "project"; repoPath: string } | { kind: "all" };
 /** The `projectFocus` of the "All projects" entry. */

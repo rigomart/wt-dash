@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { beta, context, openedWorktreeList, press, row, send } from "../support/update";
+import { beta, context, openedWorktreeList, orphan, press, row, send } from "../support/update";
 import { listView, projectsView } from "../../src/ui/selectors";
 import { ALL_PROJECTS, initialState } from "../../src/ui/state";
 
@@ -38,8 +38,8 @@ test("several projects start on the projects screen; enter opens one and esc com
   expect(state.screen).toEqual({ kind: "projects" });
   const view = projectsView(state, ctx.snapshot);
   expect(view.projects.map((project) => [project.repoName, project.counts])).toEqual([
-    ["alpha", { Safe: 1, Review: 1, Busy: 0, Broken: 0 }],
-    ["beta", { Safe: 1, Review: 0, Busy: 0, Broken: 0 }],
+    ["alpha", { Safe: 1, Review: 1, Busy: 0, Broken: 0, Orphaned: 0 }],
+    ["beta", { Safe: 1, Review: 0, Busy: 0, Broken: 0, Orphaned: 0 }],
   ]);
   expect(view.projects[0]).toMatchObject({ totalKiB: 30, safeKiB: 10 });
   state = press(state, ctx, "j", { name: "return" });
@@ -112,4 +112,13 @@ test("[ and ] step between projects, and / searches every project", () => {
   state = press(state, ctx, "[", { name: "escape" }, "/", "b", "e", "t", "a");
   expect(state.screen).toEqual({ kind: "all" });
   expect(listView(state, ctx.snapshot).rows.map((item) => item.id)).toEqual(["c"]);
+});
+
+test("6 shows only the orphans, and esc returns to every row", () => {
+  const ctx = context([row("a", 10), beta("b", 20), orphan("x", 30)]);
+  let state = press(openedWorktreeList(ctx), ctx, "6");
+  expect(state.tab).toBe("Orphaned");
+  expect(listView(state, ctx.snapshot).rows.map((item) => item.id)).toEqual([orphan("x", 30).id]);
+  state = press(state, ctx, { name: "escape" });
+  expect(state.tab).toBe("All");
 });

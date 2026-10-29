@@ -6,6 +6,7 @@ export interface Theme {
   review: RGBA;
   busy: RGBA;
   broken: RGBA;
+  orphaned: RGBA;
   accent: RGBA;
   focusBg: RGBA;
   toastBg: RGBA;
@@ -22,6 +23,7 @@ export function createTheme(mode: "dark" | "light" | null): Theme {
     review: RGBA.fromIndex(3),
     busy: RGBA.fromIndex(4),
     broken: RGBA.fromIndex(1),
+    orphaned: RGBA.fromIndex(5),
     accent: RGBA.fromIndex(6),
     focusBg: RGBA.fromHex(light ? "#dfe3ea" : "#2b303b"),
     toastBg: RGBA.fromHex(light ? "#f3ead2" : "#3a3222"),
@@ -38,5 +40,7 @@ export function verdictColor(theme: Theme, verdict: Verdict): RGBA {
       return theme.busy;
     case "Broken":
       return theme.broken;
+    case "Orphaned":
+      return theme.orphaned;
   }
 }
