@@ -44,8 +44,7 @@ afterEach(() => {
   for (const recorder of recorders.splice(0)) recorder.releaseAll();
 });
 
-// Fails until the full listing reads sizes after enriching its rows.
-test.failing("keeps a size measured while the full listing enriches its rows (#20)", async () => {
+test("keeps a size measured while the full listing enriches its rows (#20)", async () => {
   const { repo, built } = late;
   const path = built.path!;
   const recorder = recording();
