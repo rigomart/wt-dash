@@ -466,9 +466,48 @@ test("the confirm bar names uncommitted changes it will discard, and esc cancels
         include: true,
         discardChanges: true,
         forceDeleteBranch: false,
-        reapProcesses: false,
+        reapProcesses: true,
       },
     });
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("the confirm dialog shows live sizes and says which are still sizing", async () => {
+  const sized = row("api", 2000);
+  const unsized = row("docs", 0, { sizeKiB: null, sizeMeasuredAt: null });
+  const { actions } = fakeActions((rows) =>
+    rows.map((selected) => entry({ ...selected, sizeKiB: null })),
+  );
+  const ui = await start(130, 24, [sized, unsized], actions);
+  try {
+    ui.setup.mockInput.pressKey("x");
+    expect(await ui.frame()).toContain("Remove 1 worktree · up to 2.0 MB?");
+    await ui.escape();
+    ui.setup.mockInput.pressKey("j");
+    ui.setup.mockInput.pressKey("x");
+    const frame = await ui.frame();
+    expect(frame).toContain("Remove 1 worktree · 1 sizing?");
+    expect(frame).not.toContain("0 KB");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("removal stops processes inside unless e leaves them running", async () => {
+  const item = row("api", 2000);
+  const { actions, executed } = fakeActions((rows) => rows.map((selected) => entry(selected)));
+  const ui = await start(130, 24, [item], actions);
+  try {
+    ui.setup.mockInput.pressKey("x");
+    expect(await ui.frame()).toContain("Stops processes running inside  e leave them");
+    ui.setup.mockInput.pressKey("e");
+    expect(await ui.frame()).toContain("Processes inside keep running  e stop them");
+    await Bun.sleep(400);
+    ui.setup.mockInput.pressKey("y");
+    await ui.frame();
+    expect(executed[0]).toMatchObject({ [item.id]: { reapProcesses: false } });
   } finally {
     await ui.stop();
   }

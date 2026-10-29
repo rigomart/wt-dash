@@ -124,7 +124,7 @@ Everywhere, `r` rescans every repository, `?` shows every key, and `q` quits. Se
 Enter opens one confirmation dialog. It lists each worktree and its size, the total, and which ones would lose uncommitted or untracked changes. Press `y` or Enter to go ahead, or Esc to cancel.
 
 - **Branches are kept** unless they are merged. Press `D` in the dialog to delete unmerged branches too. An unmerged branch without a worktree is skipped unless you press `D`, since deleting it is all its removal does.
-- **Processes are left alone** unless you press `e`, which asks Worktrunk to stop processes running inside.
+- **Processes running inside are stopped**, such as dev servers, watchers, and language servers, so they don't hold the folder open. Worktrunk leaves interactive shells and terminal editors alone. Press `e` in the dialog to leave every process running.
 - **Ignored files go with the worktree.** That includes `.env` copies, local databases, and caches, the same way Worktrunk treats them.
 - **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, it was created again at the same path, a rebase or merge is in progress, or an agent marked it since the preview, it is skipped and comes back with a note. A branch without a worktree is skipped if it moved, was deleted, or now has a worktree, or if a worktree folder has the same name as the branch, because Worktrunk would remove that worktree instead. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
 - **Worktrunk hooks are skipped.** Project-defined cleanup commands do not run.

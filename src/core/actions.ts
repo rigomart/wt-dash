@@ -261,7 +261,13 @@ export function createActionService(options: {
     };
     if (blockedReason) return entry;
     const assessment = assess(fresh!);
-    entry.row = { ...fresh!, verdict: assessment.verdict, reason: assessment.reason };
+    entry.row = {
+      ...fresh!,
+      sizeKiB: row.sizeKiB,
+      sizeMeasuredAt: row.sizeMeasuredAt,
+      verdict: assessment.verdict,
+      reason: assessment.reason,
+    };
     entry.blockedReason = assessment.removalBlockReason;
     return entry;
   }
