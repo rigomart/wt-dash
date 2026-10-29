@@ -14,7 +14,7 @@ import {
   TEST_TIMEOUT,
 } from "../support/fixture";
 import { named } from "../support/runners";
-import { row, timeline } from "./helpers";
+import { row, scan, timeline } from "./helpers";
 
 setDefaultTimeout(TEST_TIMEOUT);
 
@@ -171,6 +171,51 @@ test("an agent mark from the last day keeps a merged worktree or branch out of S
     expect({ name, ...judged(row(snapshot, built[name]!)) }).toEqual({ name, ...expected });
   }
   expect(snapshot.rows.filter((shown) => shown.repoPath === marks.path)).toHaveLength(3);
+});
+
+test("a worktree or branch carries its commits beyond main, their line counts, its latest subject and its notes", async () => {
+  const repo = await sandbox.repo("work");
+  const busy = await repo.unmergedWorktree("busy", { commits: 2 });
+  const idle = await repo.freshWorktree("idle");
+  const open = await repo.unmergedBranch("open");
+  await repo.git("config", "branch.busy.description", "Rate limit the API\n\nPer client IP.\n");
+  for (const pair of ["task=Try GraphQL", "ticket=API-142"])
+    await sandbox.exec(
+      sandbox.wtPath,
+      ["config", "state", "vars", "set", pair, "--branch", "open"],
+      {
+        cwd: repo.path,
+      },
+    );
+  const { dashboard } = await sandbox.services();
+  const snapshot = await scan(dashboard, repo);
+  const work = (built: Built) => {
+    const { mainAhead, mainBehind, mainDiff, subject } = row(snapshot, built);
+    return { mainAhead, mainBehind, mainDiff, subject };
+  };
+  expect(work(busy)).toEqual({
+    mainAhead: 2,
+    mainBehind: 0,
+    mainDiff: { added: 2, deleted: 0 },
+    subject: "Change busy.2.txt",
+  });
+  expect(work(idle)).toMatchObject({ mainAhead: 0, mainDiff: { added: 0, deleted: 0 } });
+  const notes = (built: Built) => {
+    const { description, vars } = row(snapshot, built);
+    return { description, vars };
+  };
+  expect(notes(busy)).toEqual({ description: "Rate limit the API\n\nPer client IP.", vars: null });
+  expect(notes(open)).toEqual({
+    description: null,
+    vars: { task: "Try GraphQL", ticket: "API-142" },
+  });
+  expect(notes(idle)).toEqual({ description: null, vars: null });
+  expect(work(open)).toEqual({
+    mainAhead: 1,
+    mainBehind: 0,
+    mainDiff: { added: 1, deleted: 0 },
+    subject: "Change open.txt",
+  });
 });
 
 test("readCreatedAt reads when Git created a worktree's record, which later writes don't move, or null without a birth time", async () => {

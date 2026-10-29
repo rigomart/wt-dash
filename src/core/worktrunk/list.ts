@@ -1,5 +1,12 @@
 import { basename } from "node:path";
-import type { ChangeFlags, CommandRunner, ToolName, WorktreeFacts, WorktreeRow } from "../types";
+import type {
+  ChangeFlags,
+  CommandRunner,
+  LineCounts,
+  ToolName,
+  WorktreeFacts,
+  WorktreeRow,
+} from "../types";
 import { assess } from "../assess";
 
 /** `wt list` arguments for a repo's worktrees and, unless `branches` is false, its local branches without one. */
@@ -45,6 +52,24 @@ function changesFrom(value: unknown): ChangeFlags | null {
     deleted: input.deleted as boolean,
     conflicted: typeof input.conflicted === "boolean" ? input.conflicted : null,
   };
+}
+
+function lineCountsFrom(value: unknown): LineCounts | null {
+  const input = object(value);
+  return typeof input?.added === "number" && typeof input.deleted === "number"
+    ? { added: input.added, deleted: input.deleted }
+    : null;
+}
+
+function varsFrom(value: unknown): Record<string, string> | null {
+  const entries = Object.entries(object(value) ?? {}).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
+function count(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
 }
 
 export function toolForPath(path: string): ToolName {
@@ -99,7 +124,13 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
       mainState: string(display?.state),
       integrationReason: string(integration?.reason),
       lockReason: string(object(worktree?.locked)?.reason),
-      mainAhead: typeof defaultBranch?.ahead === "number" ? defaultBranch.ahead : null,
+      mainAhead: count(defaultBranch?.ahead),
+      mainBehind: count(defaultBranch?.behind),
+      mainDiff: lineCountsFrom(defaultBranch?.diff),
+      subject: string(head?.subject),
+      // Worktrunk's JSON has no description; it is read from Git config.
+      description: null,
+      vars: varsFrom(item.vars),
       defaultBranch: defaultBranchName,
       mainBase: null,
       locked: object(worktree?.locked) !== null,

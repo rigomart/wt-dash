@@ -42,6 +42,12 @@ beforeAll(async () => {
   ]);
   alpha = built;
   beta = done;
+  await repo.git("config", "branch.squashed.description", "Fix the login redirect\nSecond line");
+  await sandbox.exec(
+    sandbox.wtPath,
+    ["config", "state", "vars", "set", "ticket=WEB-7", "--branch", "squashed"],
+    { cwd: repo.path },
+  );
 }, 30_000);
 
 afterAll(() => sandbox?.cleanup());
@@ -208,12 +214,21 @@ for (const width of WIDTHS) {
         frame = await app.waitFor((text) => names(text).length === 8);
         expect(frame).not.toContain("esc clears");
 
+        await app.focus("fresh");
+        await app.waitFor("no commits beyond main");
         await app.focus("squashed");
+        await app.waitFor("1 commit ahead of main · +1 · “Change squashed.txt”");
+        await app.waitFor("Fix the login redirect · ticket: WEB-7");
         await app.press("i");
         frame = await app.waitFor("↑↓ scroll  i back");
         expect(frame).toContain("alpha / squashed");
         expect(frame).toContain("● Safe · merged");
         expect(frame).toContain(alpha.squashed!.expected.reason);
+        expect(squeeze(frame)).toMatch(/COMMITS 1 ahead of main · \d+ behind · \+1 line\b/);
+        expect(squeeze(frame)).toContain("MESSAGE Change squashed.txt");
+        expect(squeeze(frame)).toMatch(
+          /DESCRIPTION Fix the login redirect \n.* Second line \n.*VARS ticket: WEB-7 \n/,
+        );
         expect(squeeze(frame)).toContain(`SIZE ${app.size(alpha.squashed!)} · measured just now`);
         await app.waitFor("UNCOMMITTED   none");
         await app.press("escape");

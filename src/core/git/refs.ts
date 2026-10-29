@@ -33,6 +33,36 @@ export async function readComparisonBase(
   return branch;
 }
 
+const descriptionKey = /^branch\.(.+)\.description$/;
+
+/** Each branch's description from `branch.<name>.description`; config that can't be read gives none. */
+export async function readDescriptions(
+  repo: string,
+  runner: CommandRunner,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const descriptions = new Map<string, string>();
+  try {
+    const result = await runner(
+      "git",
+      ["-C", repo, "config", "--null", "--get-regexp", "^branch\\..*\\.description$"],
+      signal,
+    );
+    // Exit 1 means no entry matched.
+    if (result.exitCode !== 0) return descriptions;
+    for (const entry of result.stdout.split("\0")) {
+      const newline = entry.indexOf("\n");
+      if (newline < 0) continue;
+      const branch = descriptionKey.exec(entry.slice(0, newline))?.[1];
+      const text = entry.slice(newline + 1).trim();
+      if (branch && text) descriptions.set(branch, text);
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+  }
+  return descriptions;
+}
+
 /** `rev-parse --verify -q` exits 1 with no output for a missing ref. */
 export async function readTip(
   repoPath: string,

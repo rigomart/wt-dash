@@ -2,11 +2,14 @@ import { assess, markerNote, removalBlockReason } from "../../core/assess";
 import type { ToolName, WorktreeRow } from "../../core/types";
 import { isSizing } from "../../core/view";
 import {
+  aheadLabel,
   agoLabel,
   branchLabel,
   changesLabel,
   countLabel,
+  divergenceLabel,
   homePath,
+  plain,
   porcelainPath,
   sizeLabel,
   statusLabel,
@@ -76,6 +79,8 @@ export function worktreeSummary(
     row.path === null
       ? [dim(`Branch without a worktree · created ${agoLabel(row.createdAt, now)}`)]
       : [dim(middle(homePath(row.path, home), width))],
+    ...workLine(row, width),
+    ...notesLine(row, width),
     row.path === null
       ? [dim(`${commit} · ${upstreamLabel(row)}`)]
       : [
@@ -90,11 +95,29 @@ export function worktreeSummary(
   const blocked = ctx.canAct && !inJob(state, row.id) ? removalBlockReason(row) : null;
   if (blocked && row.verdict !== "Broken")
     lines.push([seg(clip(`Can't be removed: ${blocked}`, width), { fg: theme.review })]);
-  if (ctx.canAct && row.kind === "worktree")
-    lines.push(...pad(summaryFiles(row, state, ctx, width), SUMMARY_FILE_LINES));
+  // Above the files, so a strip too short for everything cuts an ignored-files line rather than the mark.
   const mark = markerNote(row, now);
   if (mark) lines.push([dim(clip(mark, width))]);
+  if (ctx.canAct && row.kind === "worktree")
+    lines.push(...pad(summaryFiles(row, state, ctx, width), SUMMARY_FILE_LINES));
   return lines;
+}
+
+function workLine(row: WorktreeRow, width: number): Line[] {
+  const ahead = aheadLabel(row);
+  const subject = row.mainAhead !== 0 && row.subject ? `“${plain(row.subject)}”` : "";
+  if (!ahead) return subject ? [[seg(clip(subject, width))]] : [];
+  if (!subject) return [[dim(clip(ahead, width))]];
+  const prefix = `${ahead} · `;
+  return [[dim(prefix), seg(clip(subject, Math.max(0, width - textWidth(prefix))))]];
+}
+
+function notesLine(row: WorktreeRow, width: number): Line[] {
+  const notes = [
+    row.description?.split("\n")[0] ?? "",
+    ...Object.entries(row.vars ?? {}).map(([key, value]) => `${key}: ${value}`),
+  ].filter(Boolean);
+  return notes.length ? [[seg(clip(notes.join(" · "), width))]] : [];
 }
 
 function summaryFiles(row: WorktreeRow, state: UiState, ctx: RenderContext, width: number): Line[] {
@@ -165,6 +188,10 @@ export function field(label: string, value: string, width: number, look: Style =
   ]);
 }
 
+function optionalField(label: string, value: string | null, width: number): Line[] {
+  return value ? field(label, value, width) : [];
+}
+
 function fileField(
   label: string,
   items: string[],
@@ -229,11 +256,21 @@ export function detailLines(
     ...(row.path === null
       ? field("CREATED", agoLabel(row.createdAt, now), width)
       : field("CREATED BY", TOOL_NAMES[row.tool], width)),
+    ...(row.description ?? "")
+      .split("\n")
+      .flatMap((text, index) =>
+        text.trim() ? field(index ? "" : "DESCRIPTION", text, width) : [],
+      ),
+    ...Object.entries(row.vars ?? {}).flatMap(([key, value], index) =>
+      field(index ? "" : "VARS", `${key}: ${value}`, width),
+    ),
+    ...optionalField("COMMITS", divergenceLabel(row), width),
     ...field(
       "LAST COMMIT",
       agoLabel(row.committedAt, now) + (row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""),
       width,
     ),
+    ...optionalField("MESSAGE", row.subject && plain(row.subject), width),
     ...(row.path === null
       ? []
       : field(
