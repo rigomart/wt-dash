@@ -16,7 +16,7 @@ wt-dash opens on its projects: an "All projects" entry first, then each reposito
 
 1. Right after `up`, line 1 reads `wt-dash › api` and `7 worktrees and 2 branches · up to 12.2 MB · scanned HH:MM  r rescan`; the focused sidebar row is `▌ api 7` with `12.1 MB`, `api`'s rows show on the right without focus, and the footer reads `→ worktrees  a select safe  / search`.
 2. The sidebar lists, in order: `All projects 16  16.1 MB`, `api 7  12.1 MB`, `web 6  4.0 MB`, `docs 3  12 KB`. The repo `tools` (no worktrees) is not listed.
-3. Up to "All projects": line 1 reads `wt-dash › all projects` with `3 projects · 16 worktrees and 2 branches · up to 16.4 MB · 1 sizing`; line 2 tabs read `All 18  Safe 7  Review 8  Busy 2  Broken 1`.
+3. Up to "All projects": line 1 reads `wt-dash › all projects` with `3 projects · 16 worktrees and 2 branches · up to 16.4 MB · scanned HH:MM`, with no `sizing`; line 2 tabs read `All 18  Safe 7  Review 8  Busy 2  Broken 1`.
 4. The details under the sidebar for "All projects": `3 projects`, `16.1 MB safe of 16.4 MB`, `3 worktrees uncommitted`, `other 16 · no worktree 2`.
 5. Focusing `web`: details read `4.0 MB safe of 4.1 MB`, `1 worktree uncommitted`, `other 6`, `largest 4.0 MB · feat…ndle`.
 6. Tab moves into the list: the footer starts `space select  enter remove`; ← brings back `→ worktrees  a select safe` in the footer.
@@ -25,4 +25,4 @@ wt-dash opens on its projects: an "All projects" entry first, then each reposito
 ## Traps
 
 - Sizes other than `feature/assets` (12.0 MB) and `feature/bundle` (4.0 MB) are a few KB from `du` and were measured on macOS APFS; on another file system compare them with `state`/`du`, not these numbers.
-- `1 sizing` stays in the header while `web › feature/gone` (Broken, folder missing) is listed: a missing folder is never measured.
+- `web › feature/gone` (Broken, folder missing) has no size, so its size column shows `…`; its `du` fails at once and the header does not count it as `sizing` (#24). `N sizing` counts worktrees with no size whose `du` is running right now, whatever the verdict: a failed `du` (folder gone, unreadable subfolder) stops counting, and `r` or `R` counts it again while it reruns. A seeded scan finishes in under a second.

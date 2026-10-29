@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { stat, utimes } from "node:fs/promises";
+import { chmod, mkdir, rm, stat, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { sizeLabel } from "../../src/ui/format";
@@ -82,6 +82,118 @@ test(
         }
         expect(await exists(built.path!)).toBe(true);
       });
+    }),
+  TEST_TIMEOUT,
+);
+
+test(
+  "#24: a worktree whose folder is missing is never counted as sizing, at 120 or 80 columns",
+  () =>
+    inSandbox(async (sandbox) => {
+      const repo = await sandbox.repo("alpha");
+      const kept = await repo.sizedWorktree("kept", { kib: 1024 });
+      await repo.deletedWorktree("gone");
+      await (await sandbox.repo("beta")).sizedWorktree("other", { kib: 64 });
+      const recorder = record(sandbox.runner);
+      const du = recorder.gate(named("du", kept.path!));
+      const header = (frame: string) => frame.split("\n")[0]!;
+      await withApp(sandbox, { width: 120, runner: recorder.runner, name: "B24" }, async (app) => {
+        try {
+          await du.reached;
+          const frame = await app.waitFor((text) => header(text).includes("scanned"));
+          expect(header(frame)).toContain(" · 1 sizing · scanned ");
+        } finally {
+          recorder.releaseAll();
+        }
+        const frame = await app.settled();
+        expect(header(frame)).toContain("wt-dash › alpha");
+        expect(header(frame)).toContain(" scanned ");
+        expect(header(frame)).not.toContain("sizing");
+      });
+      await withApp(sandbox, { width: 80, height: 24, name: "B24" }, async (app) => {
+        const frame = await app.settled();
+        expect(lineWith(frame, "▌ alpha")).not.toBe("");
+        expect(header(frame)).toContain(" scanned ");
+        expect(header(frame)).not.toContain("sizing");
+        expect(lineWith(frame, "SAFE TO FREE")).not.toBe("");
+        expect(lineWith(frame, "SAFE TO FREE")).not.toContain("sizing");
+        await app.press("enter");
+        const list = await app.waitFor((text) => header(text).includes("wt-dash › alpha"));
+        expect(header(list)).toContain(" scanned ");
+        expect(header(list)).not.toContain("sizing");
+      });
+    }),
+  TEST_TIMEOUT,
+);
+
+test(
+  "#24: a worktree Git calls prunable but whose files remain counts as sizing until du returns",
+  () =>
+    inSandbox(async (sandbox) => {
+      const repo = await sandbox.repo("alpha");
+      const orphan = await repo.sizedWorktree("orphan", { kib: 1024 });
+      await rm(join(orphan.path!, ".git"));
+      expect(await repo.git("worktree", "list", "--porcelain")).toContain("prunable");
+      const recorder = record(sandbox.runner);
+      const du = recorder.gate(named("du", orphan.path!));
+      const header = (frame: string) => frame.split("\n")[0]!;
+      await withApp(sandbox, { width: 120, runner: recorder.runner, name: "B24p" }, async (app) => {
+        try {
+          await du.reached;
+          const frame = await app.waitFor((text) => header(text).includes("scanned"));
+          expect(header(frame)).toContain(" · 1 sizing · scanned ");
+        } finally {
+          recorder.releaseAll();
+        }
+        const frame = await app.waitFor((text) => !header(text).includes("sizing"));
+        expect(header(frame)).toContain(` · up to ${app.size(orphan)} · scanned `);
+        expect(app.size(orphan)).not.toBe("…");
+      });
+    }),
+  TEST_TIMEOUT,
+);
+
+test(
+  "#24: a worktree whose du fails stops counting as sizing, at 120 or 80 columns",
+  () =>
+    inSandbox(async (sandbox) => {
+      const repo = await sandbox.repo("alpha");
+      const kept = await repo.sizedWorktree("kept", { kib: 64 });
+      const denied = await repo.sizedWorktree("denied", { kib: 64 });
+      await (await sandbox.repo("beta")).sizedWorktree("other", { kib: 64 });
+      const secret = join(denied.path!, "secret");
+      await mkdir(secret);
+      await chmod(secret, 0);
+      const header = (frame: string) => frame.split("\n")[0]!;
+      const idle = (text: string) =>
+        header(text).includes(" scanned ") && !header(text).includes("sizing");
+      try {
+        const recorder = record(sandbox.runner);
+        await withApp(
+          sandbox,
+          { width: 120, runner: recorder.runner, name: "B24f" },
+          async (app) => {
+            const frame = await app.waitFor((text) => idle(text) && rowOf(text, "denied") !== null);
+            expect(header(frame)).toContain("wt-dash › alpha");
+            expect(recorder.count(named("du", denied.path!))).toBe(1);
+            expect(app.services.sizes.get(denied.path!)).toBeNull();
+            expect(rowOf(frame, "denied")).toEndWith(" …");
+            expect(header(frame)).toContain(`2 worktrees · up to ${app.size(kept)} · scanned `);
+          },
+        );
+        await withApp(sandbox, { width: 80, height: 24, name: "B24f" }, async (app) => {
+          const frame = await app.waitFor(
+            (text) => idle(text) && lineWith(text, "SAFE TO FREE") !== "",
+          );
+          expect(lineWith(frame, "▌ alpha")).not.toBe("");
+          expect(lineWith(frame, "SAFE TO FREE")).not.toContain("sizing");
+          await app.press("enter");
+          const list = await app.waitFor((text) => header(text).includes("wt-dash › alpha"));
+          expect(idle(list)).toBe(true);
+        });
+      } finally {
+        await chmod(secret, 0o755);
+      }
     }),
   TEST_TIMEOUT,
 );

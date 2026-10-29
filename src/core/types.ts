@@ -108,6 +108,8 @@ export interface DashboardSnapshot {
   };
   errors: Record<string, string>;
   fatalError: string | null;
+  /** Worktree folders whose size is being measured right now. */
+  sizing: string[];
 }
 
 export interface DashboardService {

@@ -30,7 +30,7 @@ export interface App {
   /** Renders until the frame matches, and returns that frame; throws with the last frame on timeout. */
   waitFor(match: FrameMatch, options?: { timeout?: number }): Promise<string>;
   /**
-   * Waits until the scan is complete and every worktree with a folder has a size, then returns a frame drawn
+   * Waits until the scan is complete and no size is being measured, then returns a frame drawn
    * after that.
    */
   settled(options?: { timeout?: number }): Promise<string>;
@@ -118,13 +118,9 @@ export async function startApp(
   function settled({ timeout }: { timeout?: number } = {}): Promise<string> {
     let seen = 0;
     return waitFor(
-      function scanCompleteAndSized() {
+      function scanCompleteAndMeasured() {
         const snapshot = services.dashboard.getSnapshot();
-        const done =
-          snapshot.progress.phase === "complete" &&
-          snapshot.rows.every(
-            (row) => row.kind === "branch" || row.verdict === "Broken" || row.sizeKiB !== null,
-          );
+        const done = snapshot.progress.phase === "complete" && snapshot.sizing.length === 0;
         seen = done ? seen + 1 : 0;
         return seen >= POLLS_TO_SHOW_SETTLED_FRAME;
       },

@@ -6,6 +6,7 @@ import type {
   CommandRunner,
   DashboardService,
   DashboardSnapshot,
+  SizeEntry,
   SizeService,
   WorktreeRow,
 } from "../types";
@@ -24,6 +25,9 @@ interface DashboardOptions {
 export function createDashboardService(options: DashboardOptions): DashboardService {
   const listeners = new Set<(snapshot: DashboardSnapshot) => void>();
   const controllers = new Set<AbortController>();
+  const runningByPath = new Map<string, number>();
+  const newestTicketByPath = new Map<string, number>();
+  let measurements = 0;
   let closed = false;
   let generation = 0;
   let snapshot: DashboardSnapshot = {
@@ -33,10 +37,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     progress: { phase: "idle", reposTotal: 0, reposDone: 0, startedAt: null, completedAt: null },
     errors: {},
     fatalError: null,
+    sizing: [],
   };
 
-  function publish(next: DashboardSnapshot): void {
-    snapshot = next;
+  function publish(next: Omit<DashboardSnapshot, "sizing">): void {
+    snapshot = { ...next, sizing: [...runningByPath.keys()] };
     for (const listener of listeners) listener(snapshot);
   }
 
@@ -51,27 +56,40 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     });
   }
 
-  function scheduleSizes(rows: WorktreeRow[], scanGeneration: number, first: boolean): void {
-    for (const row of rows) {
-      const path = row.path;
-      if (path === null) continue;
-      void options.sizeService
-        .measureIfStale(path, first)
-        .then(() => {
-          const entry = options.sizeService.get(path);
-          if (!entry || !current(scanGeneration)) return;
-          const index = snapshot.rows.findIndex((candidate) => candidate.id === row.id);
-          if (index < 0) return;
-          const shown = snapshot.rows[index]!;
-          if (shown.sizeKiB === entry.sizeKiB && shown.sizeMeasuredAt === entry.measuredAt) return;
-          const updated = [...snapshot.rows];
-          updated[index] = { ...shown, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt };
-          publish({ ...snapshot, rows: updated });
-        })
-        .catch(() => {
-          // A failed size check leaves the row's current estimate in place.
+  /** Callers publish afterwards, so the sizing mark reaches the screen. */
+  function track(path: string, task: Promise<SizeEntry | null>): Promise<void> {
+    const ticket = ++measurements;
+    newestTicketByPath.set(path, ticket);
+    runningByPath.set(path, (runningByPath.get(path) ?? 0) + 1);
+    return task
+      .catch(() => null)
+      .then((measured) => {
+        const left = runningByPath.get(path)! - 1;
+        if (left) runningByPath.set(path, left);
+        else runningByPath.delete(path);
+        const newest = newestTicketByPath.get(path) === ticket;
+        if (!left) newestTicketByPath.delete(path);
+        if (closed) return;
+        const entry = newest ? (measured ?? options.sizeService.get(path)) : null;
+        let changed = !left;
+        const rows = snapshot.rows.map((row) => {
+          if (
+            !entry ||
+            row.path !== path ||
+            (row.sizeKiB === entry.sizeKiB && row.sizeMeasuredAt === entry.measuredAt)
+          )
+            return row;
+          changed = true;
+          return { ...row, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt };
         });
-    }
+        if (changed) publish({ ...snapshot, rows });
+      });
+  }
+
+  function scheduleSizes(rows: WorktreeRow[], first: boolean): void {
+    for (const row of rows)
+      if (row.path !== null)
+        void track(row.path, options.sizeService.measureIfStale(row.path, first));
   }
 
   return {
@@ -173,6 +191,8 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             },
           );
           if (!current(scanGeneration)) return;
+          scheduleSizes(rows, first.has(repo));
+          sized.add(repo);
           publish({
             ...snapshot,
             rows: [
@@ -180,8 +200,6 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
               ...rows,
             ],
           });
-          scheduleSizes(rows, scanGeneration, first.has(repo));
-          sized.add(repo);
         } catch {
         } finally {
           controllers.delete(controller);
@@ -247,11 +265,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
                 continue;
               }
               if (!current(scanGeneration)) continue;
+              if (!sized.has(repo)) scheduleSizes(rows, first.has(repo));
               publish({
                 ...snapshot,
                 rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows],
               });
-              if (!sized.has(repo)) scheduleSizes(rows, scanGeneration, first.has(repo));
             }
           } catch (error) {
             if (!current(scanGeneration)) continue;
@@ -289,17 +307,9 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     async refreshSize(worktreeId) {
       const row = snapshot.rows.find((candidate) => candidate.id === worktreeId);
       if (!row || row.path === null || closed) return;
-      const scanGeneration = generation;
-      const entry = await options.sizeService.measure(row.path);
-      if (!entry || !current(scanGeneration)) return;
-      publish({
-        ...snapshot,
-        rows: snapshot.rows.map((candidate) =>
-          candidate.id === worktreeId
-            ? { ...candidate, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt }
-            : candidate,
-        ),
-      });
+      const measured = track(row.path, options.sizeService.measure(row.path));
+      publish(snapshot);
+      await measured;
     },
     async close() {
       closed = true;
