@@ -5,9 +5,17 @@ import { readComparisonBase } from "./base";
 import { readCreatedAt } from "./discovery";
 import type { CommandRunner, WorktreeRow } from "./types";
 
-/** `wt list` arguments for a repo's worktrees and its local branches without one. */
-export function listArgs(repo: string): string[] {
-  return ["-C", repo, "--config-set", "list.json-schema=2", "list", "--branches", "--format=json"];
+/** `wt list` arguments for a repo's worktrees and, unless `branches` is false, its local branches without one. */
+export function listArgs(repo: string, branches = true): string[] {
+  return [
+    "-C",
+    repo,
+    "--config-set",
+    "list.json-schema=2",
+    "list",
+    ...(branches ? ["--branches"] : []),
+    "--format=json",
+  ];
 }
 
 export interface Mark {
