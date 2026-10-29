@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { assess, markerNote, MIN_AGE_MS } from "../src/core/assess";
 import { parseWorktrunk } from "../src/core/worktrunk";
 import fixture from "./fixtures/list-v2.json";
-import type { WorktreeFacts } from "../src/core/types";
+import type { ChangeFlags, WorktreeFacts } from "../src/core/types";
 
 const base = {
   ...parseWorktrunk("/repo", JSON.stringify(fixture))[0]!,
@@ -248,4 +248,58 @@ test("a recent agent mark keeps a merged branch without a worktree out of Safe",
     "Review",
     "An agent was waiting for input here 5m ago.",
   ]);
+});
+
+const cleanChanges: ChangeFlags = {
+  staged: false,
+  modified: false,
+  untracked: false,
+  renamed: false,
+  deleted: false,
+  conflicted: false,
+};
+const cleanFacts: WorktreeFacts = {
+  id: "repo\0path",
+  repoPath: "/repo",
+  repoName: "repo",
+  path: "/repo/worktree",
+  branch: "feature",
+  headSha: "abc",
+  committedAt: "2026-09-28T00:00:00Z",
+  createdAt: "2026-09-27T00:00:00Z",
+  kind: "worktree",
+  marker: null,
+  markerSetAt: null,
+  tool: "Other",
+  changes: cleanChanges,
+  upstreamAhead: 0,
+  mainState: "integrated",
+  lockReason: null,
+  mainAhead: null,
+  defaultBranch: "main",
+  mainBase: "main",
+  locked: false,
+  prunable: false,
+  operation: null,
+};
+
+describe("verdict precedence", () => {
+  test("Busy outranks Broken", () => {
+    expect(assess({ ...cleanFacts, prunable: true, operation: "rebase" }).verdict).toBe("Busy");
+  });
+
+  test.each([
+    ["lock", { locked: true }],
+    ["local edits", { changes: { ...cleanChanges, modified: true } }],
+    ["untracked files", { changes: { ...cleanChanges, untracked: true } }],
+    ["upstream commits", { upstreamAhead: 2 }],
+    ["unknown main state", { mainState: null }],
+  ] as const)("%s needs review", (_label, update) => {
+    expect(assess({ ...cleanFacts, ...update }).verdict).toBe("Review");
+  });
+
+  test("clean integrated and empty worktrees are Safe", () => {
+    expect(assess(cleanFacts).verdict).toBe("Safe");
+    expect(assess({ ...cleanFacts, mainState: "empty" }).verdict).toBe("Safe");
+  });
 });

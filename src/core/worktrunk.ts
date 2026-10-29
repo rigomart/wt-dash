@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import type { ChangeFlags, ToolName, WorktreeFacts, WorktreeRow } from "./types";
-import { verdictFor } from "./verdict";
+import { assess } from "./assess";
 
 export class SchemaMismatchError extends Error {
   constructor(schema: unknown) {
@@ -93,12 +93,8 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
       prunable: object(worktree?.prunable) !== null,
       operation: string(worktree?.operation),
     };
-    rows.push({
-      ...facts,
-      sizeKiB: null,
-      sizeMeasuredAt: null,
-      ...verdictFor(facts),
-    });
+    const { verdict, reason } = assess(facts);
+    rows.push({ ...facts, sizeKiB: null, sizeMeasuredAt: null, verdict, reason });
   }
   return rows;
 }
