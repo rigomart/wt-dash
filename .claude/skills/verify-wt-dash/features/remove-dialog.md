@@ -21,7 +21,8 @@ Enter or `x` opens one confirmation dialog listing each row and its size, the to
 5. Enter twice in one `send-keys` (open, then Enter within 400 ms) leaves the dialog open; Enter sent after the dialog has shown confirms.
 6. `y` removes: the status line (line 31 wide, 23 narrow) shows `Removing 1 of 1: feature/assets` with a spinner, then `✓ Removed 1 worktree · freed 12.0 MB`; the row is gone and the tabs count one fewer.
 7. `state` shows the worktree gone from `git worktree list` and its branch gone from `git branch`; the last `removalsLog` entry has that branch, `exitCode: 0`, `branchOutcome: "deleted"`, and `flags: ["--reap"]` (or `[]` when `e` left processes running; a dirty worktree adds `"-f"`).
-8. The developer's own `~/.cache/wt-dash/removals.log` is unchanged (compare its `ls -l` before and after).
+8. A worktree with uncommitted changes on a branch that `main` has moved past (Worktrunk lists it `behind`, integration reason `ancestor`; arrange it with Git as in [rescan.md](rescan.md): a worktree on a new branch from `main`, a commit on `main`, an edit in the worktree, then `r`): its dialog reads `Merged branches are deleted.`, not `Keeps 1 unmerged branch`, and after `y` the branch is gone from `git branch` and the `removalsLog` entry has `flags: ["-f", "--reap"]` and `branchOutcome: "deleted"` (#23).
+9. The developer's own `~/.cache/wt-dash/removals.log` is unchanged (compare its `ls -l` before and after).
 
 ## Traps
 

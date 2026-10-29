@@ -83,8 +83,12 @@ export function matchListing(row: WorktreeRow, listing: WorktreeRow[]): RemovalE
     ignoredFiles: [],
     disposableIgnored: 0,
     requiresDiscard: false,
+    // Worktrunk deletes a branch whenever an integration check matched, but a dirty worktree
+    // shows that match as "behind" or "diverged" rather than "integrated".
     branchWillBeRetained:
-      row.branch !== null && !["empty", "integrated", "same_commit"].includes(row.mainState ?? ""),
+      row.branch !== null &&
+      !row.integrationReason &&
+      !["empty", "integrated", "same_commit"].includes(row.mainState ?? ""),
   };
   if (blockedReason) return entry;
   const assessment = assess(fresh!);
