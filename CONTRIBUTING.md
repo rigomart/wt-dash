@@ -25,6 +25,8 @@ Title pull requests with [Conventional Commits](https://www.conventionalcommits.
 
 Keep the Git assessment and cleanup rules in `src/core`, and terminal interaction in `src/ui`. `src/core` has no terminal dependency, so another interface can reuse its data and rules. For cleanup changes, cover stale confirmations, locks, unfinished Git operations, local changes, and branch retention. Tests must use temporary repositories and never remove the contributor's own worktrees.
 
+Tests come in three layers. The top-level `tests/*.test.ts` check one module with Git and Worktrunk faked. `tests/integration` runs the real services from `src/app.ts` against real Git and Worktrunk in a sandbox from `tests/support/fixture.ts`, which builds a worktree or branch in each state the dashboard tells apart. `tests/e2e` drives the real terminal UI on those services with key presses and checks the rendered text and what happened on disk. A change that crosses a boundary (Worktrunk output, a service the UI calls, what a removal does) needs an integration or end-to-end test, because a faked boundary is where earlier regressions hid. A bug fix adds a test, named for its pull request, that fails without the fix.
+
 ## Continuous integration
 
 The CI workflow, `.github/workflows/ci.yml`, runs on every pull request and every push to `main`. It runs lint and format checks once, as **Lint and format**, and the other four checks on Apple Silicon and Intel Macs and on arm64 and x64 Linux, as **macOS (arm64)**, **macOS (x64)**, **Linux (arm64)**, and **Linux (x64)**. Each of these jobs keeps its archive and checksum as a build artifact for seven days. The CI workflow never publishes anything.

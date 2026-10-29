@@ -1,13 +1,9 @@
 #!/usr/bin/env bun
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { help, parseArgs, version } from "./cli";
 import { platformName, prepareStartup } from "./startup";
-import { createDashboardService } from "./core/dashboard";
-import { createActionService } from "./core/actions";
+import { createServices } from "./app";
 import { runCommand } from "./core/process";
-import { createSizeService } from "./core/sizes";
-import { discoverRepos } from "./core/discovery";
 
 async function main(): Promise<void> {
   const home = homedir();
@@ -32,32 +28,17 @@ async function main(): Promise<void> {
       "Run wt-dash in an interactive terminal. Use --doctor to check setup without opening the UI.",
     );
   const { runTerminal } = await import("./ui/terminal");
-  const sizes = createSizeService(join(home, ".cache/wt-dash/sizes.json"), runCommand);
-  await sizes.load();
-  const dashboard = createDashboardService({
-    projectRoot: ready.roots[0]!,
+  const { dashboard, actions, close } = await createServices({
+    home,
+    roots: ready.roots,
+    depth: options.depth,
     wtPath: ready.wtPath,
     runner: runCommand,
-    sizeService: sizes,
-    discover: async () =>
-      [
-        ...new Set(
-          (
-            await Promise.all(ready.roots.map((root) => discoverRepos(root, options.depth + 1)))
-          ).flat(),
-        ),
-      ].sort(),
-  });
-  const actions = createActionService({
-    wtPath: ready.wtPath,
-    runner: runCommand,
-    logPath: join(home, ".cache/wt-dash/removals.log"),
   });
   try {
     await runTerminal(dashboard, { actions });
   } finally {
-    await dashboard.close();
-    await sizes.close();
+    await close();
   }
 }
 
