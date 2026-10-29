@@ -24,10 +24,6 @@ let emptyShell: string;
 let scanned: Repo;
 let pruned: string;
 
-/**
- * A repository outside the scan folders, named `name`, with a worktree at `~/.codex/worktrees/<id>/app` as
- * Codex lays it out. `deleteRepo` deletes the repository afterwards, leaving the worktree an orphan.
- */
 async function codexWorktree(
   id: string,
   name: string,

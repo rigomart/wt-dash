@@ -52,7 +52,6 @@ function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}):
   };
 }
 
-/** A Codex worktree folder under the test home, `/repos`, whose repository at `~/old/<id>` is gone. */
 function orphan(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}): WorktreeRow {
   return row(id, sizeKiB, {
     id: `${ORPHANS}\0${id}`,
@@ -1042,8 +1041,10 @@ test("removing an orphan says wt-dash deletes it itself, and offers e only with 
       "No repository tracks abcd/app, so wt-dash deletes it itself, unchecked,",
     );
     expect(frame).toContain("Stops processes running inside");
-    // The orphan's files were never checked, so the clean note speaks for the worktree alone.
-    expect(frame).toContain("Nothing uncommitted in the worktrees.");
+    expect(
+      frame,
+      "clean note covers the worktree alone; the orphan's files were never checked",
+    ).toContain("Nothing uncommitted in the worktrees.");
     ui.setup.mockInput.pressKey("y");
     frame = await ui.frame();
     expect(executed).toHaveLength(1);

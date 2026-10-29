@@ -45,7 +45,6 @@ export function clockLabel(iso: string | null): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-/** The branch, or for an orphan, which has none, its folder's name. */
 /** An orphan is named by its folder, with the folder above unless that is the agent's `worktrees` folder: `abcd/app`. */
 export function branchLabel(row: WorktreeRow): string {
   if (row.kind === "orphan" && row.path) {

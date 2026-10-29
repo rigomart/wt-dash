@@ -136,7 +136,6 @@ export async function planRemoval(
   options: Omit<ActionOptions, "logPath">,
 ): Promise<RemovalPlan> {
   const entries: RemovalEntry[] = [];
-  // Orphans are checked on disk; no repository lists them.
   const orphans = rows.map(async (row, index) => {
     if (row.kind === "orphan") entries[index] = await planOrphan(row);
   });

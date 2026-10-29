@@ -123,7 +123,6 @@ export const beta = (id: string, sizeKiB: number, overrides: Partial<WorktreeRow
     ...overrides,
   });
 
-/** A worktree folder under `/home/me/.codex/worktrees` whose repository at `/home/me/old/<id>` is gone. */
 export const orphan = (id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}) =>
   row(id, sizeKiB, {
     id: `${ORPHANS}\0${id}`,

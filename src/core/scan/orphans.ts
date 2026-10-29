@@ -13,7 +13,6 @@ export interface Orphan {
 /** The file Codex leaves in each `~/.codex/worktrees/<id>` folder. */
 export const CODEX_NAME_FILE = ".codex-worktree-name";
 
-/** True when `path` exists, false when it or a folder above it doesn't; other errors are thrown. */
 async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -24,7 +23,6 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** Real folders directly inside `folder`, skipping symlinks and files; none when it can't be read. */
 async function subfolders(folder: string): Promise<string[]> {
   try {
     const entries = await readdir(folder, { withFileTypes: true });
@@ -40,7 +38,6 @@ export function isCodexShellLocation(folder: string): boolean {
   return basename(parent) === "worktrees" && basename(dirname(parent)) === ".codex";
 }
 
-/** A `.codex/worktrees/<id>` folder whose only entry, apart from a `.DS_Store`, is the Codex name file. */
 async function isEmptyShell(folder: string): Promise<boolean> {
   if (!isCodexShellLocation(folder)) return false;
   const entries = (await readdir(folder, { withFileTypes: true })).filter(
@@ -166,7 +163,6 @@ export function orphanRow({ path, cause }: Orphan): WorktreeRow {
   return { ...facts, sizeKiB: null, sizeMeasuredAt: null, verdict, reason };
 }
 
-/** Whether two orphan causes say the same thing. */
 export function sameCause(a: OrphanCause | null | undefined, b: OrphanCause | null | undefined) {
   if (!a || !b || a.kind !== b.kind) return false;
   if (a.kind === "emptyShell" || b.kind === "emptyShell") return true;

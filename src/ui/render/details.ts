@@ -76,7 +76,6 @@ export function worktreeSummary(
     dim(state.screen.kind === "all" && row.kind !== "orphan" ? ` · ${row.repoName}  ` : "  "),
     seg(`● ${row.verdict} · ${statusLabel(row)}`, { fg: color }),
   ];
-  // An orphan has no Git state to show, only where it is, why no repository knows it, and its size.
   const lines: Line[] =
     row.kind === "orphan"
       ? [
@@ -252,12 +251,11 @@ export function detailLines(
   if (!row) return [[dim("No worktree in view")]];
   const assessment = assess(row);
   const color = verdictColor(theme, row.verdict);
-  // An orphan has no repository or Git state, so it shows only its folder, maker and size.
-  const git = row.kind !== "orphan";
+  const hasGitState = row.kind !== "orphan";
   const lines: Line[] = [
-    ...wrap(git ? `${row.repoName} / ${branchLabel(row)}` : branchLabel(row), width).map((text) => [
-      seg(text, { bold: true }),
-    ]),
+    ...wrap(hasGitState ? `${row.repoName} / ${branchLabel(row)}` : branchLabel(row), width).map(
+      (text) => [seg(text, { bold: true })],
+    ),
     [seg("● ", { fg: color }), seg(`${row.verdict} · ${statusLabel(row)}`, { fg: color })],
     ...wrap(homeText(assessment.reason, ctx.home), width - 2).map((text) => [dim(`  ${text}`)]),
     [],
@@ -278,7 +276,7 @@ export function detailLines(
       field(index ? "" : "VARS", `${key}: ${value}`, width),
     ),
     ...optionalField("COMMITS", divergenceLabel(row), width),
-    ...(git
+    ...(hasGitState
       ? field(
           "LAST COMMIT",
           agoLabel(row.committedAt, now) + (row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""),
@@ -294,7 +292,7 @@ export function detailLines(
           changesLabel(row) === "clean" ? { fg: theme.safe } : { fg: theme.review },
         )
       : []),
-    ...(git ? field("UPSTREAM", upstreamLabel(row), width) : []),
+    ...(hasGitState ? field("UPSTREAM", upstreamLabel(row), width) : []),
     ...(row.locked && assessment.status !== "locked"
       ? field("LOCK", row.lockReason ?? "no lock reason supplied", width)
       : []),

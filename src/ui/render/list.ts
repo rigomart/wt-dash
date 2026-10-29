@@ -158,7 +158,7 @@ function rowLine(
   return fitLine(parts, ctx.width, focused ? { bg: theme.focusBg } : undefined);
 }
 
-/** An orphan has no repository to name; its section says what it is. */
+/** The repository name, empty for an orphan. */
 export function repoCell(row: WorktreeRow): string {
   return row.kind === "orphan" ? "" : row.repoName;
 }

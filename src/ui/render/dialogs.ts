@@ -151,8 +151,8 @@ function removeDialog(
       dim(confirm.deleteUnmerged ? " keep them" : " delete too"),
     ]);
   } else if (merged.length) options.push([dim("Merged branches are deleted.")]);
-  // Deleting an orphan stops no processes, so e has nothing to choose when the batch is all orphans.
-  if (orphans.length < ready.length)
+  const hasProcessesToStop = orphans.length < ready.length;
+  if (hasProcessesToStop)
     options.push([
       confirm.reap
         ? dim("Stops processes running inside  ")

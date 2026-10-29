@@ -69,7 +69,6 @@ export async function removeBatch(
       entryWarnings[index]!.push(`Could not write removal log for ${label}: ${String(cause)}`);
     }
   }
-  /** Rechecked on disk right before it is deleted; it never reaches Worktrunk or Git. */
   async function removeOrphan(index: number): Promise<void> {
     const { row, folderId } = plan.entries[index]!;
     const blockedReason = await recheckOrphan(row, folderId);

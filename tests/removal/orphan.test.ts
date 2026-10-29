@@ -30,7 +30,6 @@ const exists = (path: string) =>
     () => false,
   );
 
-/** A Codex worktree at `<home>/.codex/worktrees/<id>/app` whose repository at `<root>/old/app` is gone. */
 async function world(id = "abcd") {
   const root = await mkdtemp(join(tmpdir(), "dash-orphan-"));
   roots.push(root);

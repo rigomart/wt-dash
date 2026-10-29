@@ -18,7 +18,7 @@ export interface RemovalEntry extends FileReport {
   blockedReason: string | null;
   requiresDiscard: boolean;
   branchWillBeRetained: boolean;
-  /** An orphan folder's device and inode at the preview, so a folder swapped in at its path is not deleted. */
+  /** Device and inode of an orphan folder at the preview; removal skips it if the folder at the path differs. */
   folderId?: string;
 }
 export interface RemovalPlan {

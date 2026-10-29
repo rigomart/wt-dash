@@ -18,7 +18,6 @@ async function sandbox() {
   return { root, home };
 }
 
-/** A folder whose `.git` file holds `link`. */
 async function linked(folder: string, link: string): Promise<string> {
   await mkdir(folder, { recursive: true });
   await writeFile(join(folder, ".git"), link);

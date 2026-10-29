@@ -176,8 +176,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       async function scanOrphans(
         find: NonNullable<DashboardOptions["findOrphans"]>,
       ): Promise<void> {
-        // A targeted rescan read only its own repos' records; orphans are checked against every repo's.
-        const known = await Promise.all(
+        const recordsOfEveryRepo = await Promise.all(
           snapshot.repos.map(async ({ path }) => ({
             path,
             linked: linkedByPath.has(path)
@@ -185,7 +184,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
               : await (options.readLinked ?? readLinkedWorktrees)(path),
           })),
         );
-        const rows = withSizes((await find(known)).map(orphanRow));
+        const rows = withSizes((await find(recordsOfEveryRepo)).map(orphanRow));
         if (!current(scanGeneration)) return;
         scanned.add(ORPHANS);
         scheduleSizes(rows, false);
@@ -194,7 +193,6 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
           rows: [...snapshot.rows.filter((row) => row.repoPath !== ORPHANS), ...rows],
         });
       }
-      // Orphans are found alongside the listing; a failed search leaves no orphan rows after a full scan.
       const orphansScanned =
         options.findOrphans && (!targeted || targeted.has(ORPHANS))
           ? scanOrphans(options.findOrphans).catch(() => {})

@@ -15,11 +15,7 @@ import {
 } from "../support/app";
 import type { Sandbox } from "../support/fixture";
 
-/**
- * Arranges, under the sandbox's HOME as Codex lays them out: a worktree `~/.codex/worktrees/abcd/app` whose
- * repository was deleted, an empty Codex folder `ef01`, and a live worktree of a repository outside the scan
- * folders. Only the first two are orphans.
- */
+/** Of the folders arranged, only `abcd/app` and `ef01` are orphans; `9a9a/lib` is live. */
 async function arrangeOrphans(sandbox: Sandbox) {
   const codex = join(sandbox.home, ".codex", "worktrees");
   const old = join(sandbox.home, "old", "app");
@@ -61,7 +57,6 @@ test(
         expect(entries).toEqual(["alpha 1", "Orphaned folders 2"]);
         expect(frame).not.toContain("lib");
 
-        // With a single repository the app opens it on start; Esc goes back to the projects.
         await app.press("escape");
         await app.waitFor("→ worktrees");
         await app.press("down");

@@ -115,7 +115,6 @@ const VERDICT_COLUMNS = [
   countColumn("Broken", "BROKEN"),
   countColumn("Orphaned", "ORPHANED"),
 ];
-/** The verdict columns under the short tab labels, so every verdict still fits 80 columns. */
 const SHORT_VERDICT_COLUMNS = [
   countColumn("Safe", "SAFE"),
   countColumn("Review", "REV"),
@@ -292,7 +291,6 @@ function projectDetails(view: ProjectsView, ctx: RenderContext, width: number): 
     null,
   );
   const sizing = project.unsized ? ` · ${project.unsized} sizing` : "";
-  // Orphans have no Git status to free or keep, only folders and their size.
   if (orphans) lines.push(...field("SIZE", `up to ${sizeLabel(project.totalKiB)}${sizing}`, width));
   else
     lines.push(

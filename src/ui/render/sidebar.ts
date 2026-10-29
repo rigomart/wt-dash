@@ -85,9 +85,11 @@ function sidebarLines(
     const count = String(worktreeCount(project) || (project.pending ? "…" : 0));
     const selected = project.rows.filter((row) => state.selected.has(row.id)).length;
     const mark = selected ? ` ■${selected}` : "";
-    // Orphans are never Safe, so they have nothing for FREE, and their long name takes its room.
-    const free = project.repoPath === ORPHANS ? 0 : SIDEBAR_FREE.width;
-    const nameWidth = Math.max(1, width - 2 - free - textWidth(count) - textWidth(mark) - 1);
+    const freeColumnWidth = project.repoPath === ORPHANS ? 0 : SIDEBAR_FREE.width;
+    const nameWidth = Math.max(
+      1,
+      width - 2 - freeColumnWidth - textWidth(count) - textWidth(mark) - 1,
+    );
     const name = middle(project.repoName, nameWidth);
     const parts: Line = [
       focused ? seg("▌ ", { fg: theme.accent, dim: !active }) : seg("  "),
@@ -95,11 +97,11 @@ function sidebarLines(
       dim(` ${count}`),
       seg(mark, { fg: theme.safe }),
     ];
-    parts.push(seg(" ".repeat(Math.max(0, width - free - lineWidth(parts)))));
-    if (free)
+    parts.push(seg(" ".repeat(Math.max(0, width - freeColumnWidth - lineWidth(parts)))));
+    if (freeColumnWidth)
       parts.push(
         project.error && !project.rows.length
-          ? cell("! failed", free, { fg: theme.review }, "right")
+          ? cell("! failed", freeColumnWidth, { fg: theme.review }, "right")
           : SIDEBAR_FREE.cell(project, ctx),
       );
     return fitLine(parts, width, focused && active ? { bg: theme.focusBg } : undefined);
@@ -177,7 +179,6 @@ function projectCard(
     const room = Math.max(1, width - label.length - value.length - 3);
     return [dim(label), seg(value), dim(" · "), dim(middle(branchLabel(row), room))];
   };
-  // Orphans have no Git status to free or keep, only folders and their size.
   if (orphans)
     lines.push([
       seg(`up to ${sizeLabel(project.totalKiB)}`, { fg: theme.orphaned }),

@@ -4,7 +4,6 @@ import { CODEX_NAME_FILE, isCodexShellLocation, readOrphanCause, sameCause } fro
 import type { OrphanCause, WorktreeRow } from "../types";
 import type { RemovalEntry } from "./types";
 
-/** The device and inode of the folder at `path`, following symlinks above it as deletion would. */
 async function folderId(path: string): Promise<string> {
   const { dev, ino } = await stat(path);
   return `${dev}:${ino}`;
@@ -42,10 +41,6 @@ export async function planOrphan(row: WorktreeRow): Promise<RemovalEntry> {
   };
 }
 
-/**
- * Deletes a Codex `<id>` folder that holds no worktree: its name file, then the folder only if that left it
- * empty, so a worktree Codex adds there meanwhile is never deleted.
- */
 async function deleteShell(folder: string): Promise<void> {
   for (const name of [CODEX_NAME_FILE, ".DS_Store"]) await rm(join(folder, name), { force: true });
   await rmdir(folder);

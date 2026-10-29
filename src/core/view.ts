@@ -95,7 +95,7 @@ export function isSizing(snapshot: Pick<DashboardSnapshot, "sizing">, row: Workt
   return row.sizeKiB === null && row.path !== null && snapshot.sizing.includes(row.path);
 }
 
-/** Groups rows by repo in the order they come, with orphans, which have no repo, last. */
+/** Groups rows by repo in the order they come, orphans last. */
 export function groupByRepo(rows: WorktreeRow[]): RepoGroup[] {
   const groups = new Map<string, RepoGroup>();
   for (const row of rows) {

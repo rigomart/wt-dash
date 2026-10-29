@@ -21,7 +21,7 @@ export interface LineCounts {
  */
 export type RowKind = "worktree" | "branch" | "orphan";
 
-/** The `repoPath` of every orphan row. Real repo paths are absolute, so it cannot collide with one. */
+/** The `repoPath` of every orphan row. */
 export const ORPHANS = "orphans";
 
 /** Why no repository knows an orphan folder. */
