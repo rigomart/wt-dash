@@ -83,6 +83,11 @@ export function selectRows(rows: WorktreeRow[], options: ViewOptions): WorktreeR
     });
 }
 
+/** A worktree with no size yet that can still get one; a missing folder never does. */
+export function awaitsSize(row: WorktreeRow): boolean {
+  return row.kind === "worktree" && !row.prunable && row.sizeKiB === null;
+}
+
 export function groupByRepo(rows: WorktreeRow[]): RepoGroup[] {
   const groups = new Map<string, RepoGroup>();
   for (const row of rows) {

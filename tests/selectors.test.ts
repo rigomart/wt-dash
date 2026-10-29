@@ -60,6 +60,14 @@ test("projects are ordered by how many worktrees they have, then by name", () =>
   expect(view.projects.map((project) => project.repoName)).toEqual(["beta", "alpha", "gamma"]);
 });
 
+test("#24: a worktree whose folder is missing is not counted as sizing", () => {
+  const gone = row("gone", 0, { verdict: "Broken", prunable: true, sizeKiB: null });
+  const measuring = row("measuring", 0, { sizeKiB: null });
+  const ctx = context([row("a", 10), gone, measuring]);
+  const project = projectsView(initialState(), ctx.snapshot).projects[0]!;
+  expect([project.worktrees, project.unsized]).toEqual([3, 1]);
+});
+
 test("branches without a worktree are selectable but not counted as worktrees or sized", () => {
   const leftover = row("old", 0, {
     kind: "branch",

@@ -1,4 +1,4 @@
-import { groupByRepo, selectRows } from "../core/view";
+import { awaitsSize, groupByRepo, selectRows } from "../core/view";
 import type { DashboardSnapshot, Verdict, WorktreeRow } from "../core/types";
 import {
   ALL_PROJECTS,
@@ -38,7 +38,7 @@ export interface Project {
   counts: Record<Verdict, number>;
   totalKiB: number;
   safeKiB: number;
-  /** Worktrees not measured yet. */
+  /** Worktrees still waiting for a size. */
   unsized: number;
   linked: number | null;
   pending: boolean;
@@ -75,7 +75,7 @@ function summarize(
     counts[row.verdict]++;
     if (row.kind === "branch") continue;
     worktrees++;
-    if (row.sizeKiB === null) unsized++;
+    if (awaitsSize(row)) unsized++;
     totalKiB += row.sizeKiB ?? 0;
     if (row.verdict === "Safe") safeKiB += row.sizeKiB ?? 0;
   }

@@ -86,6 +86,46 @@ test(
   TEST_TIMEOUT,
 );
 
+test(
+  "#24: a worktree whose folder is missing is never counted as sizing, at 120 or 80 columns",
+  () =>
+    inSandbox(async (sandbox) => {
+      const repo = await sandbox.repo("alpha");
+      const kept = await repo.sizedWorktree("kept", { kib: 1024 });
+      await repo.deletedWorktree("gone");
+      await (await sandbox.repo("beta")).sizedWorktree("other", { kib: 64 });
+      const recorder = record(sandbox.runner);
+      const du = recorder.gate(named("du", kept.path!));
+      const header = (frame: string) => frame.split("\n")[0]!;
+      await withApp(sandbox, { width: 120, runner: recorder.runner, name: "B24" }, async (app) => {
+        try {
+          await du.reached;
+          const frame = await app.waitFor((text) => header(text).includes("scanned"));
+          expect(header(frame)).toContain(" · 1 sizing · scanned ");
+        } finally {
+          recorder.releaseAll();
+        }
+        const frame = await app.settled();
+        expect(header(frame)).toContain("wt-dash › alpha");
+        expect(header(frame)).toContain(" scanned ");
+        expect(header(frame)).not.toContain("sizing");
+      });
+      await withApp(sandbox, { width: 80, height: 24, name: "B24" }, async (app) => {
+        const frame = await app.settled();
+        expect(lineWith(frame, "▌ alpha")).not.toBe("");
+        expect(header(frame)).toContain(" scanned ");
+        expect(header(frame)).not.toContain("sizing");
+        expect(lineWith(frame, "SAFE TO FREE")).not.toBe("");
+        expect(lineWith(frame, "SAFE TO FREE")).not.toContain("sizing");
+        await app.press("enter");
+        const list = await app.waitFor((text) => header(text).includes("wt-dash › alpha"));
+        expect(header(list)).toContain(" scanned ");
+        expect(header(list)).not.toContain("sizing");
+      });
+    }),
+  TEST_TIMEOUT,
+);
+
 /** A `sleep 300` in `folder` with no controlling terminal. */
 function sleeper(folder: string): Subprocess {
   return Bun.spawn(
