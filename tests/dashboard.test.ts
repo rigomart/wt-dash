@@ -393,6 +393,118 @@ test("branches without a worktree are listed and aged like `wt step prune`, but 
   }
 });
 
+test("lists worktrees before branches without a worktree, and measures each worktree once", async () => {
+  const payload: any = structuredClone(fixture);
+  payload.items.push({
+    branch: "leftover",
+    head: { sha: "leftover" },
+    default_branch: { ahead: 0, behind: 1, integration: { reason: "ancestor" } },
+    display: { state: "integrated" },
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const lists: string[][] = [];
+  const measured: string[] = [];
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: {
+      ...sizeService,
+      measureIfStale: async (path) => {
+        measured.push(path);
+        return null;
+      },
+    },
+    discover: async () => ["/repo"],
+    readLinked: async () => ({ count: 2, paths: [] }),
+    runner: async (_command, args) => {
+      if (!args.includes("list")) return result("", 1);
+      lists.push(args);
+      if (args.includes("--branches")) await gate;
+      return result(JSON.stringify(payload));
+    },
+  });
+  try {
+    const pending = service.refresh();
+    const early = await waitFor(service, (snapshot) => snapshot.rows.length > 0);
+    expect(early.progress.phase).toBe("scanning");
+    expect(early.rows.map((row) => row.kind)).toEqual(["worktree", "worktree"]);
+    expect(lists[0]).not.toContain("--branches");
+    release();
+    await pending;
+    expect(lists.map((args) => args.includes("--branches"))).toEqual([false, true]);
+    expect(
+      service
+        .getSnapshot()
+        .rows.map((row) => row.branch ?? "detached")
+        .sort(),
+    ).toEqual(["detached", "feature/name", "leftover"]);
+    expect(measured).toHaveLength(2);
+  } finally {
+    await service.close();
+  }
+});
+
+test("lists the first project's worktrees on their own before the other projects'", async () => {
+  const events: string[] = [];
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService,
+    discover: async () => ["/big", "/small-1", "/small-2"],
+    readLinked: async (repo) => ({ count: repo === "/big" ? 5 : 1, paths: [] }),
+    runner: async (_command, args) => {
+      if (!args.includes("list") || args.includes("--branches")) return result();
+      events.push(`start ${args[1]}`);
+      await Bun.sleep(5);
+      events.push(`end ${args[1]}`);
+      return result();
+    },
+  });
+  try {
+    await service.refresh();
+    expect(events.slice(0, 2)).toEqual(["start /big", "end /big"]);
+    expect(events).toHaveLength(6);
+  } finally {
+    await service.close();
+  }
+});
+
+test("a failed worktree listing leaves the repo to its full listing", async () => {
+  const measured: string[] = [];
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: {
+      ...sizeService,
+      measureIfStale: async (path) => {
+        measured.push(path);
+        return null;
+      },
+    },
+    discover: async () => ["/flaky", "/bad"],
+    readLinked: async () => ({ count: 2, paths: [] }),
+    runner: async (_command, args) => {
+      if (!args.includes("list")) return result("", 1);
+      if (args[1] === "/bad") return result("", 1);
+      return args.includes("--branches") ? result() : result("{");
+    },
+  });
+  try {
+    await service.refresh();
+    const snapshot = service.getSnapshot();
+    expect(snapshot.fatalError).toBeNull();
+    expect(snapshot.errors["/bad"]).toContain("failed");
+    expect(snapshot.rows.map((row) => row.repoPath)).toEqual(["/flaky", "/flaky"]);
+    expect(measured).toHaveLength(2);
+    expect(snapshot.progress).toMatchObject({ phase: "complete", reposDone: 2 });
+  } finally {
+    await service.close();
+  }
+});
+
 test("Git-safe rows are immediately available while other repositories are still scanning", async () => {
   const { removalBlockReason } = await import("../src/core/actions");
   let release!: () => void;

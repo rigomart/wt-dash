@@ -164,6 +164,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       const linked = await Promise.all(repos.map(options.readLinked ?? readLinkedWorktrees));
       if (!current(scanGeneration)) return;
       const found = repos.map((path, index) => ({ path, linked: linked[index]?.count ?? null }));
+      const linkedByPath = new Map(repos.map((path, index) => [path, linked[index]]));
       const { order, first } = listingOrder(
         repos.map((path, index) => ({ path, linked: linked[index]! })),
         (path) => options.sizeService.get(path)?.sizeKiB ?? null,
@@ -177,6 +178,56 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
           : found,
         progress: { ...snapshot.progress, reposTotal: repos.length },
       });
+      // Branches without a worktree take most of a cold `wt list`; the full listing reuses what this one cached.
+      const sized = new Set<string>();
+      const quickRepos = order.filter((repo) => linkedByPath.get(repo)?.count !== 0);
+      async function tryListWorktrees(repo: string): Promise<void> {
+        const controller = new AbortController();
+        controllers.add(controller);
+        try {
+          const result = await options.runner(
+            options.wtPath,
+            listArgs(repo, false),
+            controller.signal,
+          );
+          if (result.exitCode !== 0 || !current(scanGeneration)) return;
+          const rows = await enrichRows(
+            repo,
+            withSizes(parseWorktrunk(repo, result.stdout).filter((row) => row.kind === "worktree")),
+            options.runner,
+            {
+              readCreated: options.readCreated,
+              readBranchCreated: options.readBranchCreated,
+              signal: controller.signal,
+            },
+          );
+          if (!current(scanGeneration)) return;
+          publish({
+            ...snapshot,
+            rows: [
+              ...snapshot.rows.filter((row) => row.repoPath !== repo || row.kind !== "worktree"),
+              ...rows,
+            ],
+          });
+          scheduleSizes(rows, scanGeneration, first.has(repo));
+          sized.add(repo);
+        } catch {
+        } finally {
+          controllers.delete(controller);
+        }
+      }
+      let nextQuick = 0;
+      // A cold `wt list` keeps every core busy, so list the first project alone.
+      if (quickRepos.length && quickRepos[0] === order[0])
+        await tryListWorktrees(quickRepos[nextQuick++]!);
+      async function quickWorker(): Promise<void> {
+        while (nextQuick < quickRepos.length && current(scanGeneration))
+          await tryListWorktrees(quickRepos[nextQuick++]!);
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(4, quickRepos.length - nextQuick) }, () => quickWorker()),
+      );
+      if (!current(scanGeneration)) return;
       let nextRepo = 0;
       async function worker(): Promise<void> {
         while (nextRepo < order.length && current(scanGeneration)) {
@@ -232,7 +283,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
                 ...snapshot,
                 rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows],
               });
-              scheduleSizes(rows, scanGeneration, first.has(repo));
+              if (!sized.has(repo)) scheduleSizes(rows, scanGeneration, first.has(repo));
             }
           } catch (error) {
             if (!current(scanGeneration)) continue;
