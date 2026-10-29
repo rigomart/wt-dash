@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { createServices } from "../../src/app";
-import type { ActionService } from "../../src/core/actions";
+import type { ActionService } from "../../src/core/removal/types";
 import { discoverRepos, readCreatedAt } from "../../src/core/scan/discovery";
 import type {
   CommandResult,

@@ -5,7 +5,7 @@ import type {
   RemovalEntry,
   RemovalPlan,
   RemovalResult,
-} from "../core/actions";
+} from "../core/removal/types";
 import type { DashboardSnapshot, Verdict, WorktreeRow } from "../core/types";
 
 export type Tab = "All" | "Safe" | "Review" | "Busy" | "Broken";

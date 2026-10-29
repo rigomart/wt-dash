@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { RemovalChoice } from "../../src/core/actions";
+import type { RemovalChoice } from "../../src/core/removal/types";
 import {
   createSandbox,
   type Built,

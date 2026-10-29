@@ -1,6 +1,5 @@
 import type { RGBA } from "@opentui/core";
-import { assess } from "../../core/assess";
-import { removalBlockReason } from "../../core/actions";
+import { assess, removalBlockReason } from "../../core/assess";
 import type { Verdict, WorktreeRow } from "../../core/types";
 import { ageLabel, branchLabel, rowsLabel, sizeLabel, statusLabel } from "../format";
 import { cell, clip, fitLine, middle, rule, seg, spread, textWidth, type Line } from "../line";

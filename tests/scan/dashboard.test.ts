@@ -506,7 +506,7 @@ test("a failed worktree listing leaves the repo to its full listing", async () =
 });
 
 test("Git-safe rows are immediately available while other repositories are still scanning", async () => {
-  const { removalBlockReason } = await import("../../src/core/actions");
+  const { removalBlockReason } = await import("../../src/core/assess");
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;

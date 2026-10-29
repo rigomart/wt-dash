@@ -1,5 +1,4 @@
-import { assess, markerNote } from "../../core/assess";
-import { removalBlockReason } from "../../core/actions";
+import { assess, markerNote, removalBlockReason } from "../../core/assess";
 import type { ToolName, WorktreeRow } from "../../core/types";
 import {
   agoLabel,

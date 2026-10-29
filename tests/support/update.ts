@@ -1,4 +1,4 @@
-import type { RemovalEntry } from "../../src/core/actions";
+import type { RemovalEntry } from "../../src/core/removal/types";
 import type { DashboardSnapshot, WorktreeRow } from "../../src/core/types";
 import {
   initialState,

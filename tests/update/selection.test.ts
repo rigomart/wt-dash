@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { beta, context, openedWorktreeList, press, row, send } from "./support/update";
-import { initialState } from "../src/ui/state";
+import { beta, context, openedWorktreeList, press, row, send } from "../support/update";
+import { initialState } from "../../src/ui/state";
 
 test("a selects every Safe row in view and pressing it again clears them", () => {
   const ctx = context([

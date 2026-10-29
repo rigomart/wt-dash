@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { FileReport } from "../actions";
+import type { FileReport } from "../removal/types";
 import { failure } from "../process";
 import type { CommandRunner, WorktreeRow } from "../types";
 

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { beta, context, openedWorktreeList, press, row, send } from "./support/update";
-import { listView, projectsView } from "../src/ui/selectors";
-import { ALL_PROJECTS, initialState } from "../src/ui/state";
+import { beta, context, openedWorktreeList, press, row, send } from "../support/update";
+import { listView, projectsView } from "../../src/ui/selectors";
+import { ALL_PROJECTS, initialState } from "../../src/ui/state";
 
 test("esc undoes one thing at a time", () => {
   const ctx = context([row("a", 10), row("b", 20)]);

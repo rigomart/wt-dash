@@ -6,7 +6,7 @@ export type WorktreeState = Pick<
   "headSha" | "branch" | "locked" | "lockReason" | "prunable" | "operation"
 > & { path: string };
 /** Branch names have no refs/heads/ prefix, as Worktrunk reports them. */
-export function parseWorktreeList(stdout: string): Array<Omit<WorktreeState, "operation">> {
+function parseWorktreeList(stdout: string): Array<Omit<WorktreeState, "operation">> {
   const worktrees: Array<Omit<WorktreeState, "operation">> = [];
   for (const line of stdout.split("\n")) {
     const space = line.indexOf(" ");

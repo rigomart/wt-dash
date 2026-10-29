@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { context, entry, openedWorktreeList, press, row, send } from "./support/update";
-import { listView } from "../src/ui/selectors";
-import { CONFIRM_ARM_MS } from "../src/ui/state";
+import { context, entry, openedWorktreeList, press, row, send } from "../support/update";
+import { listView } from "../../src/ui/selectors";
+import { CONFIRM_ARM_MS } from "../../src/ui/state";
 
 test("x then y removes the selection in the background with the choices the confirm bar named", () => {
   const rows = [

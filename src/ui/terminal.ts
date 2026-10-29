@@ -7,7 +7,7 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
-import type { ActionService } from "../core/actions";
+import type { ActionService } from "../core/removal/types";
 import type { DashboardService, DashboardSnapshot } from "../core/types";
 import { toStyledText } from "./line";
 import { listView, spinning } from "./selectors";
