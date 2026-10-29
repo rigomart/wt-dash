@@ -1409,6 +1409,14 @@ function pruneDialog(
   };
 }
 
+function withLiveSizes(entries: RemovalEntry[], rows: WorktreeRow[]): RemovalEntry[] {
+  const live = new Map(rows.map((row) => [row.id, row]));
+  return entries.map((entry) => {
+    const sizeKiB = live.get(entry.row.id)?.sizeKiB ?? entry.row.sizeKiB;
+    return { ...entry, row: { ...entry.row, sizeKiB } };
+  });
+}
+
 function removeDialog(
   confirm: Extract<Confirm, { kind: "remove" }>,
   ctx: RenderContext,
@@ -1416,7 +1424,15 @@ function removeDialog(
 ) {
   const { theme } = ctx;
   const { ready, blocked } = confirm;
-  const kib = ready.reduce((sum, entry) => sum + (entry.row.sizeKiB ?? 0), 0);
+  const sized = withLiveSizes(ready, ctx.snapshot.rows);
+  const kib = sized.reduce((sum, entry) => sum + (entry.row.sizeKiB ?? 0), 0);
+  const unsized = sized.filter(
+    (entry) => entry.row.kind === "worktree" && entry.row.sizeKiB === null,
+  ).length;
+  const size = [
+    kib || !unsized ? `up to ${sizeLabel(kib)}` : "",
+    unsized ? `${unsized} sizing` : "",
+  ].filter(Boolean);
   const notes: Line[] = [];
   const dirty = ready.filter((entry) => entry.requiresDiscard);
   const warn = (text: string) => wrap(text, inner).map((part) => [seg(part, { fg: theme.review })]);
@@ -1463,14 +1479,14 @@ function removeDialog(
   } else if (merged.length) options.push([dim("Merged branches are deleted.")]);
   options.push([
     confirm.reap
-      ? seg("Stops processes running inside  ", { fg: theme.review })
-      : dim("Processes inside keep running  "),
+      ? dim("Stops processes running inside  ")
+      : seg("Processes inside keep running  ", { fg: theme.review }),
     key(theme, "e"),
     dim(confirm.reap ? " leave them" : " stop them"),
   ]);
   const tail: Line[] = [[], ...notes, [], ...options, []];
   const room = Math.max(1, ctx.height - 3 - tail.length);
-  const shown = ready.length > room ? ready.slice(0, room - 1) : ready;
+  const shown = sized.length > room ? sized.slice(0, room - 1) : sized;
   const sizeWidth = 9;
   const repoWidth = inner >= 50 ? 14 : 0;
   const rows: Line[] = shown.map((entry) => [
@@ -1484,7 +1500,7 @@ function removeDialog(
   ]);
   if (shown.length < ready.length) rows.push([dim(`  +${ready.length - shown.length} more`)]);
   return {
-    title: `Remove ${rowsLabel(ready.map((entry) => entry.row))} · up to ${sizeLabel(kib)}?`,
+    title: `Remove ${[rowsLabel(ready.map((entry) => entry.row)), ...size].join(" · ")}?`,
     content: [...rows, ...tail],
     answer: buttons(theme, `Remove ${ready.length}`),
   };

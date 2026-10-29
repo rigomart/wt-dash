@@ -204,7 +204,7 @@ test("x then y removes the selection in the background with the choices the conf
     ],
   };
   state = send(state, ctx, { type: "planReady", token: state.pending!.token, plan }).state;
-  expect(state.confirm).toMatchObject({ kind: "remove", deleteUnmerged: false, reap: false });
+  expect(state.confirm).toMatchObject({ kind: "remove", deleteUnmerged: false, reap: true });
   if (state.confirm?.kind !== "remove") throw new Error("expected a removal confirm");
   expect(state.confirm.ready.map((item) => item.row.id)).toEqual(["clean", "dirty", "unmerged"]);
   expect(state.confirm.blocked.map((item) => item.row.id)).toEqual(["moved"]);
@@ -224,19 +224,19 @@ test("x then y removes the selection in the background with the choices the conf
           include: true,
           discardChanges: false,
           forceDeleteBranch: false,
-          reapProcesses: false,
+          reapProcesses: true,
         },
         dirty: {
           include: true,
           discardChanges: true,
           forceDeleteBranch: false,
-          reapProcesses: false,
+          reapProcesses: true,
         },
         unmerged: {
           include: true,
           discardChanges: false,
           forceDeleteBranch: true,
-          reapProcesses: false,
+          reapProcesses: true,
         },
         moved: {
           include: false,

@@ -550,6 +550,21 @@ test("preview lists each repo and reads its comparison base once", async () => {
   expect(calls.filter((call) => call.includes("status"))).toHaveLength(4);
 });
 
+test("preview keeps the measured size of each row", async () => {
+  const actions = createActionService({
+    wtPath: "/wt",
+    runner: twoRepoRunner([]),
+    logPath: "/unused",
+  });
+  const sized = { ...branchRow, sizeKiB: 2048, sizeMeasuredAt: "2026-01-01T00:00:00.000Z" };
+  const plan = await actions.prepareRemoval([sized]);
+  expect(plan.entries[0]?.blockedReason).toBeNull();
+  expect(plan.entries[0]?.row).toMatchObject({
+    sizeKiB: 2048,
+    sizeMeasuredAt: "2026-01-01T00:00:00.000Z",
+  });
+});
+
 test("preview keeps input order across repos listed in parallel", async () => {
   const calls: string[][] = [];
   const slowA = async () => {

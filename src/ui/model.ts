@@ -467,7 +467,7 @@ export function update(state: UiState, event: UiEvent, ctx: Context): Result {
           ready,
           blocked,
           deleteUnmerged: false,
-          reap: false,
+          reap: true,
         },
       });
     }
