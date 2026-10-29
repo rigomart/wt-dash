@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import type {
   ChangeFlags,
   CommandRunner,
@@ -72,10 +72,40 @@ function count(value: unknown): number | null {
   return typeof value === "number" ? value : null;
 }
 
-export function toolForPath(path: string): ToolName {
+export const TOOL_NAMES: Record<ToolName, string> = {
+  Claude: "Claude Code",
+  Codex: "Codex",
+  t3: "t3",
+  Cursor: "Cursor",
+  Conductor: "Conductor",
+  Windsurf: "Windsurf",
+  Gemini: "Gemini CLI",
+  ClaudeSquad: "Claude Squad",
+  Superset: "Superset",
+  Worktrunk: "Worktrunk",
+  Other: "other",
+};
+
+/** Cursor and Superset document only their base folder, so one or two levels below it match. */
+const TOOL_LAYOUTS: Array<readonly [RegExp, ToolName]> = [
+  [/\/\.t3\/worktrees\/[^/]+\/[^/]+$/, "t3"],
+  [/\/\.cursor\/worktrees\/[^/]+(\/[^/]+)?$/, "Cursor"],
+  [/\/conductor\/workspaces\/[^/]+\/[^/]+$/, "Conductor"],
+  [/\/\.windsurf\/worktrees\/[^/]+\/[^/]+$/, "Windsurf"],
+  [/\/\.gemini\/worktrees\/[^/]+$/, "Gemini"],
+  [/\/\.claude-squad\/worktrees\/[^/]+$/, "ClaudeSquad"],
+  [/\/\.superset\/worktrees\/[^/]+(\/[^/]+)?$/, "Superset"],
+];
+
+export function toolForPath(path: string, repoPath: string): ToolName {
+  const layout = TOOL_LAYOUTS.find(([pattern]) => pattern.test(path));
+  if (layout) return layout[1];
   if (path.includes("/.claude/worktrees/")) return "Claude";
   if (path.includes("/.codex/worktrees/")) return "Codex";
   if (path.includes("/.t3-lines/lines/worktrees/")) return "t3";
+  // Worktrunk's default `worktree-path` puts `<repo>.<branch>` beside the repository.
+  if (dirname(path) === dirname(repoPath) && basename(path).startsWith(`${basename(repoPath)}.`))
+    return "Worktrunk";
   return "Other";
 }
 
@@ -118,7 +148,7 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
       marker: string(item.marker),
       // The JSON has no marker time; it is read from Worktrunk's state in Git config.
       markerSetAt: null,
-      tool: path === null ? "Other" : toolForPath(path),
+      tool: path === null ? "Other" : toolForPath(path, repoPath),
       changes: changesFrom(worktree?.changes),
       upstreamAhead: typeof upstream?.ahead === "number" ? upstream.ahead : null,
       mainState: string(display?.state),
