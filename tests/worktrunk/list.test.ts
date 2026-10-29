@@ -14,10 +14,43 @@ import type { CommandRunner } from "../../src/core/types";
 const repo = "/Users/test/projects/sample";
 
 describe("toolForPath", () => {
+  const tool = (path: string) => toolForPath(path, repo);
+
   test("attributes known tool directories and treats everything else as Other", () => {
-    expect(toolForPath("/Users/test/p/.claude/worktrees/a")).toBe("Claude");
-    expect(toolForPath("/Users/test/.codex/worktrees/a")).toBe("Codex");
-    expect(toolForPath("/Users/test/.cache/other-tool/a")).toBe("Other");
+    expect(tool("/Users/test/p/.claude/worktrees/a")).toBe("Claude");
+    expect(tool("/Users/test/.codex/worktrees/a")).toBe("Codex");
+    expect(tool("/Users/test/.cache/other-tool/a")).toBe("Other");
+  });
+
+  test("attributes t3's current and old worktree folders to t3 (#43)", () => {
+    expect(tool("/Users/test/.t3/worktrees/sample/feature-login")).toBe("t3");
+    expect(tool("/Users/test/.t3-lines/lines/worktrees/sample/a")).toBe("t3");
+  });
+
+  test("attributes each agent tool's default worktree folder to it", () => {
+    expect(tool("/Users/test/.cursor/worktrees/sample/k3x9")).toBe("Cursor");
+    expect(tool("/Users/test/.cursor/worktrees/1a2b3c4d")).toBe("Cursor");
+    expect(tool("/Users/test/conductor/workspaces/sample/nagoya")).toBe("Conductor");
+    expect(tool("/Users/test/.windsurf/worktrees/sample/brave-otter")).toBe("Windsurf");
+    expect(tool("/Users/test/projects/sample/.gemini/worktrees/my-feature")).toBe("Gemini");
+    expect(tool("/Users/test/.claude-squad/worktrees/fix-login_18a2b3c4d5e6f708")).toBe(
+      "ClaudeSquad",
+    );
+    expect(tool("/Users/test/.superset/worktrees/sample/add-auth")).toBe("Superset");
+  });
+
+  test("attributes Worktrunk's default `<repo>.<branch>` folder beside the repository to Worktrunk", () => {
+    expect(tool("/Users/test/projects/sample.feature-auth")).toBe("Worktrunk");
+    expect(tool("/Users/test/projects/sample-feature-auth")).toBe("Other");
+    expect(tool("/Users/test/worktrees/sample.feature-auth")).toBe("Other");
+  });
+
+  test("attributes a worktree only to the tool whose folder it is, not to one it is nested in", () => {
+    expect(tool("/Users/test/.t3/worktrees/sample/feature/sandbox/worktrees/a")).toBe("Other");
+    expect(tool("/Users/test/.t3/worktrees/sample")).toBe("Other");
+    expect(tool("/Users/test/conductor/workspaces/sample/nagoya/vendor/b")).toBe("Other");
+    expect(tool("/Users/test/.codex/worktrees/1f04/sample/.gemini/worktrees/topic")).toBe("Gemini");
+    expect(tool("/Users/test/p/.claude/worktrees/a/.gemini/worktrees/topic")).toBe("Gemini");
   });
 });
 

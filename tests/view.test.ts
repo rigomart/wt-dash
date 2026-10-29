@@ -69,6 +69,18 @@ test("searches branch and path without case sensitivity and combines filters", (
   expect(selectRows(rows, { search: "NOTES" }).map((item) => item.id)).toEqual(["two"]);
 });
 
+test("searches the name a tool is shown by (#43)", () => {
+  const rows = [
+    row("one", { tool: "Claude" }),
+    row("two", { tool: "ClaudeSquad" }),
+    row("three", { tool: "Gemini" }),
+  ];
+  const found = (search: string) => selectRows(rows, { search }).map((item) => item.id);
+  expect(found("claude code")).toEqual(["one"]);
+  expect(found("claude squad")).toEqual(["two"]);
+  expect(found("gemini cli")).toEqual(["three"]);
+});
+
 test("defaults to largest first and keeps unknown sizes last", () => {
   const rows = [row("a", { sizeKiB: null }), row("b", { sizeKiB: 4 }), row("c", { sizeKiB: 20 })];
   expect(selectRows(rows, {}).map((item) => item.id)).toEqual(["c", "b", "a"]);

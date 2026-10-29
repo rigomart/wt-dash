@@ -18,6 +18,7 @@ In a worktree list, 1–5 show All, Safe, Review, Busy or Broken; `/` searches b
 4. `s` cycles the footer label `s sort: size ↓` → `s sort: age ↓` → `s sort: repo ↑` → `s sort: size ↓`; `S` turns `size ↓` into `size ↑`.
 5. With `size ↓` on "All projects", the Safe section starts `feature/assets` (12.0 MB) then `feature/bundle` (4.0 MB); with `size ↑` it starts `docs/typos`, and `leftover/hotfix` (branch) stays last either way.
 6. `v` on "All projects" replaces the verdict sections with repo groups, the first reading `▸ api  7 worktrees and 2 branches · 12.2 MB  4 safe  5 review`, each row with a colored `●`, and the footer shows `v by repo`; `v` again restores them. In a single project, `v` shows the toast `Grouping by repo works in the all-projects view`.
+7. Search matches the name a tool is shown by (#43). After `git worktree add -b try/gemini <api>/.gemini/worktrees/try-gemini main` as the instance's user and `r`, typing `gemini cli` leaves one row, `try/gemini`, and line 2 ends `/ gemini cli   1 of <all rows>`. The path holds `.gemini` but not `gemini cli`, so only the tool's name matches.
 
 ## Traps
 
