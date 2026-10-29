@@ -831,3 +831,37 @@ test("#24: a failed measurement stops counting as sizing, and a remeasure or res
     await service.close();
   }
 });
+
+test("#24: a remeasure that settles after a rescan does not overwrite the rescan's size", async () => {
+  const { sizes, held } = heldSizes();
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: sizes,
+    discover: async () => ["/repo"],
+    runner: async () => result(),
+  });
+  const size = (id: string) =>
+    service.getSnapshot().rows.find((candidate) => candidate.id === id)?.sizeKiB;
+  try {
+    await service.refresh();
+    for (const entry of held.slice(0, 2))
+      entry.settle({ sizeKiB: 5, measuredAt: "2026-10-01T00:00:00Z" });
+    await Bun.sleep(0);
+    const row = service
+      .getSnapshot()
+      .rows.find((candidate) => candidate.branch === "feature/name")!;
+    const remeasured = service.refreshSize(row.id);
+    await service.refresh();
+    for (const entry of held.slice(3))
+      entry.settle({ sizeKiB: 128, measuredAt: "2026-10-01T02:00:00Z" });
+    await Bun.sleep(0);
+    expect(size(row.id)).toBe(128);
+    held[2]!.settle({ sizeKiB: 16, measuredAt: "2026-10-01T01:00:00Z" });
+    await remeasured;
+    expect(size(row.id)).toBe(128);
+    expect(service.getSnapshot().sizing).toEqual([]);
+  } finally {
+    await service.close();
+  }
+});
