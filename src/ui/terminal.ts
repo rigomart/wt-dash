@@ -10,15 +10,9 @@ import {
 import type { ActionService } from "../core/actions";
 import type { DashboardService, DashboardSnapshot } from "../core/types";
 import { toStyledText } from "./line";
-import {
-  initialState,
-  listView,
-  spinning,
-  update,
-  type Effect,
-  type UiEvent,
-  type UiState,
-} from "./model";
+import { listView, spinning } from "./selectors";
+import { initialState, type Effect, type UiEvent, type UiState } from "./state";
+import { update } from "./update";
 import { listPageSize, render, type RenderContext, type Viewport } from "./render";
 import { createTheme } from "./theme";
 

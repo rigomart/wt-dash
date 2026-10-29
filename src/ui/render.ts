@@ -32,9 +32,6 @@ import {
   type Style,
 } from "./line";
 import {
-  ALL_PROJECTS,
-  TABS,
-  VERDICTS,
   inJob,
   isGrouped,
   jobStatus,
@@ -45,17 +42,22 @@ import {
   scopedRows,
   visibleRows,
   worktreeCount,
-  type Confirm,
   type ListView,
   type Project,
   type ProjectsView,
+  type Section,
+} from "./selectors";
+import {
+  ALL_PROJECTS,
+  TABS,
+  VERDICTS,
+  type Confirm,
   type RunStatus,
   type Screen,
-  type Section,
   type Tab,
   type Toast,
   type UiState,
-} from "./model";
+} from "./state";
 import { verdictColor, type Theme } from "./theme";
 
 export interface RenderContext {
