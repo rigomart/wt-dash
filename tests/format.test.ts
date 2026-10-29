@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { WorktreeRow } from "../src/core/types";
-import { agoLabel, statusLabel, upstreamLabel } from "../src/ui/format";
+import { agoLabel, rowsLabel, statusLabel, upstreamLabel } from "../src/ui/format";
 import { clip, fitLine, lineWidth, middle, seg, spread, wrap } from "../src/ui/line";
 
 function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
@@ -13,6 +13,9 @@ function row(overrides: Partial<WorktreeRow> = {}): WorktreeRow {
     headSha: "abc",
     committedAt: null,
     createdAt: null,
+    kind: "worktree",
+    marker: null,
+    markerSetAt: null,
     tool: "Claude",
     changes: {
       staged: false,
@@ -87,4 +90,13 @@ test("narrow STATUS cells truncate only the single Git label", () => {
   expect(statusLabel(row({ operation: "rebase" }), 0)).toBe("");
   expect(statusLabel(row({ locked: true, mainState: "ahead", upstreamAhead: 3 }))).toBe("locked");
   expect(upstreamLabel(row({ upstreamAhead: null }))).toBe("no tracking branch");
+});
+
+test("counts branches without a worktree apart from worktrees", () => {
+  const branch = row({ kind: "branch", path: null });
+  expect(rowsLabel([row(), row()])).toBe("2 worktrees");
+  expect(rowsLabel([])).toBe("0 worktrees");
+  expect(rowsLabel([branch])).toBe("1 branch");
+  expect(rowsLabel([row(), branch, branch], "Safe")).toBe("1 Safe worktree and 2 branches");
+  expect(rowsLabel([branch, branch], "Safe")).toBe("2 Safe branches");
 });

@@ -26,16 +26,56 @@ function commitsArent(count: number | null): string {
 
 /** Worktrunk's default `wt step prune --min-age`. */
 export const MIN_AGE_MS = 24 * 60 * 60 * 1000;
+/** An agent mark set more recently than this keeps a worktree or branch out of Safe. */
+export const AGENT_MARK_MS = 24 * 60 * 60 * 1000;
 
-/** "just now", "4m ago", or "3h ago". */
-function createdAgo(ms: number): string {
+/** The markers Worktrunk's agent plugins set, and what each says the agent is doing. */
+const agentMarkers: Record<string, string> = {
+  "🤖": "working",
+  "💬": "waiting for input",
+};
+
+function ago(ms: number): string {
   const minutes = Math.floor(Math.max(0, ms) / 60_000);
   if (minutes < 1) return "just now";
-  return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`;
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
-/** One authority for Git status, verdict, explanation, and removal eligibility. */
+function markAge(facts: WorktreeFacts, now: number): number | null {
+  const age = facts.markerSetAt ? now - Date.parse(facts.markerSetAt) : NaN;
+  return Number.isNaN(age) ? null : age;
+}
+
+/** Why a recent agent mark keeps the row out of Safe, or null when it has none. A mark with no time counts as recent. */
+export function recentAgentMark(facts: WorktreeFacts, now = Date.now()): string | null {
+  const activity = facts.marker ? agentMarkers[facts.marker] : undefined;
+  if (!activity) return null;
+  const age = markAge(facts, now);
+  if (age === null) return `An agent was ${activity} here; when is unknown.`;
+  return age < AGENT_MARK_MS ? `An agent was ${activity} here ${ago(age)}.` : null;
+}
+
+/** One sentence about the row's Worktrunk marker for its details, or null when it has none. */
+export function markerNote(facts: WorktreeFacts, now = Date.now()): string | null {
+  if (!facts.marker) return null;
+  const recent = recentAgentMark(facts, now);
+  if (recent) return recent;
+  const age = markAge(facts, now);
+  if (agentMarkers[facts.marker]) return `Agent mark from ${ago(age ?? 0)}, likely stale.`;
+  return age === null ? `Marked ${facts.marker}.` : `Marked ${facts.marker} ${ago(age)}.`;
+}
+
+/** One authority for Git status, verdict, explanation, and removal eligibility. A recent agent mark turns Safe into Review. */
 export function assess(facts: WorktreeFacts, now = Date.now()): Assessment {
+  const git = assessGit(facts, now);
+  if (git.verdict !== "Safe") return git;
+  const mark = recentAgentMark(facts, now);
+  return mark ? { ...git, verdict: "Review", reason: mark } : git;
+}
+
+function assessGit(facts: WorktreeFacts, now: number): Assessment {
   const result = (
     status: string,
     verdict: Verdict,
@@ -45,7 +85,10 @@ export function assess(facts: WorktreeFacts, now = Date.now()): Assessment {
   const unknown = (reason: string) =>
     result("status unknown", "Review", reason, "its Git status is unknown; press r to rescan");
 
-  if (!facts.path.startsWith("/") || !facts.repoPath.startsWith("/")) {
+  if (
+    !facts.repoPath.startsWith("/") ||
+    (facts.kind === "worktree" && !facts.path?.startsWith("/"))
+  ) {
     return unknown("The worktree path isn't absolute, so Git can't check it.");
   }
   if (facts.operation) {
@@ -84,7 +127,7 @@ export function assess(facts: WorktreeFacts, now = Date.now()): Assessment {
       : result("locked", "Review", "Locked, with no reason given.", "it's locked; unlock it first");
   }
   const changes = facts.changes;
-  if (!changes || changes.conflicted === null) {
+  if (facts.kind === "worktree" && (!changes || changes.conflicted === null)) {
     return unknown("Git couldn't read its files.");
   }
   const base = facts.mainBase ?? facts.defaultBranch ?? "the default branch";
@@ -105,11 +148,8 @@ export function assess(facts: WorktreeFacts, now = Date.now()): Assessment {
     return unknown(`Couldn't compare it with ${base}.`);
   }
   if (
-    changes.staged ||
-    changes.modified ||
-    changes.untracked ||
-    changes.renamed ||
-    changes.deleted
+    changes &&
+    (changes.staged || changes.modified || changes.untracked || changes.renamed || changes.deleted)
   ) {
     return result(
       "uncommitted changes",
@@ -126,19 +166,21 @@ export function assess(facts: WorktreeFacts, now = Date.now()): Assessment {
     if (Number.isNaN(age))
       return result(status, "Review", "Its creation time is unknown, so it may still be in use.");
     if (age < MIN_AGE_MS)
-      return result(status, "Review", `Created ${createdAgo(age)}, so it may still be in use.`);
+      return result(status, "Review", `Created ${ago(age)}, so it may still be in use.`);
     return result(status, "Safe", reason);
   };
   switch (state) {
     case "integrated": {
       if (facts.integrationReason === "same_commit")
         return safeOnceDayOld("no new commits", `Same commit as ${base}.`);
-      if (facts.integrationReason === "ancestor")
-        return safeOnceDayOld("merged", integrationDetails.ancestor!(base));
       const detail = facts.integrationReason
         ? integrationDetails[facts.integrationReason]
         : undefined;
-      return result("merged", "Safe", detail ? detail(base) : `Its content is already in ${base}.`);
+      const reason = detail ? detail(base) : `Its content is already in ${base}.`;
+      // Like `wt step prune`, a branch without a worktree waits a day however it was merged.
+      if (facts.integrationReason === "ancestor" || facts.kind === "branch")
+        return safeOnceDayOld("merged", reason);
+      return result("merged", "Safe", reason);
     }
     case "same_commit":
       return safeOnceDayOld("no new commits", `Same commit as ${base}.`);

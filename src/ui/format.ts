@@ -105,3 +105,13 @@ export function porcelainPath(line: string): string {
 export function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/** "3 worktrees", "1 branch", or "2 Safe worktrees and 1 branch", counting branches without a worktree apart. */
+export function rowsLabel(rows: WorktreeRow[], adjective = ""): string {
+  const branches = rows.filter((row) => row.kind === "branch").length;
+  const worktrees = rows.length - branches;
+  const kind = adjective ? `${adjective} ` : "";
+  if (!branches) return countLabel(worktrees, `${kind}worktree`);
+  if (!worktrees) return countLabel(branches, `${kind}branch`, `${kind}branches`);
+  return `${countLabel(worktrees, `${kind}worktree`)} and ${countLabel(branches, "branch", "branches")}`;
+}

@@ -302,18 +302,25 @@ test("cached size is included before a fresh measurement finishes", async () => 
   await service.close();
 });
 
-test("scans use Git facts without process or marker-age commands", async () => {
+test("scans read when agent marks were set from Worktrunk's state, never from processes", async () => {
   const marked = structuredClone(fixture);
   Object.assign(marked.items[1]!, { marker: "🤖" });
+  const setAt = (repo: string) =>
+    Math.floor((Date.now() - (repo === "/one" ? 3_600_000 : 30 * 86_400_000)) / 1000);
   const calls: string[][] = [];
   const service = createDashboardService({
     projectRoot: "/projects",
     wtPath: "/wt",
     sizeService,
     discover: async () => ["/one", "/two"],
+    readCreated: async () => "2026-09-01T00:00:00Z",
     runner: async (command, args) => {
       calls.push([command, ...args]);
       if (args.includes("list")) return result(JSON.stringify(marked));
+      if (args.includes("--get-regexp"))
+        return result(
+          `worktrunk.state.feature/name.marker\n{"marker":"🤖","set_at":${setAt(args[1]!)}}\0`,
+        );
       return result("", 1);
     },
   });
@@ -323,12 +330,64 @@ test("scans use Git facts without process or marker-age commands", async () => {
       service
         .getSnapshot()
         .rows.filter((row) => row.branch === "feature/name")
-        .map((row) => row.verdict),
-    ).toEqual(["Safe", "Safe"]);
-    expect(
-      calls.some((call) => call[0] === "lsof" || call[0] === "ps" || call.includes("--get-regexp")),
-    ).toBe(false);
+        .map((row) => [row.repoPath, row.verdict, row.reason])
+        .sort(),
+    ).toEqual([
+      ["/one", "Review", "An agent was working here 1h ago."],
+      ["/two", "Safe", "Its changes are in main (squash or rebase merge)."],
+    ]);
+    expect(calls.filter((call) => call.includes("--get-regexp"))).toHaveLength(2);
+    expect(calls.some((call) => call[0] === "lsof" || call[0] === "ps")).toBe(false);
     expect(service.getSnapshot().progress.phase).toBe("complete");
+  } finally {
+    await service.close();
+  }
+});
+
+test("branches without a worktree are listed and aged like `wt step prune`, but never measured", async () => {
+  const payload: any = structuredClone(fixture);
+  for (const branch of ["old", "young"])
+    payload.items.push({
+      branch,
+      head: { sha: branch },
+      default_branch: { ahead: 0, behind: 1, integration: { reason: "ancestor" } },
+      display: { state: "integrated" },
+    });
+  const measured: string[] = [];
+  const calls: string[][] = [];
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: {
+      ...sizeService,
+      measure: async (path) => {
+        measured.push(path);
+        return null;
+      },
+      measureIfStale: async (path) => {
+        measured.push(path);
+        return null;
+      },
+    },
+    discover: async () => ["/repo"],
+    readBranchCreated: async (_repo, branch) =>
+      new Date(Date.now() - (branch === "old" ? 3 : 0.1) * 86_400_000).toISOString(),
+    runner: async (command, args) => {
+      calls.push([command, ...args]);
+      return args.includes("list") ? result(JSON.stringify(payload)) : result("", 1);
+    },
+  });
+  try {
+    await service.refresh();
+    const rows = service.getSnapshot().rows.filter((row) => row.kind === "branch");
+    expect(rows.map((row) => [row.branch, row.path, row.verdict, row.reason])).toEqual([
+      ["old", null, "Safe", "Its commits are already in main."],
+      ["young", null, "Review", "Created 2h ago, so it may still be in use."],
+    ]);
+    expect(calls.find((call) => call.includes("list"))).toContain("--branches");
+    expect(measured).toHaveLength(2);
+    await service.refreshSize(rows[0]!.id);
+    expect(measured).toHaveLength(2);
   } finally {
     await service.close();
   }
@@ -435,7 +494,7 @@ test("remeasuring a worktree always measures, even when its saved size is fresh"
       .getSnapshot()
       .rows.find((candidate) => candidate.branch === "feature/name")!;
     await service.refreshSize(row.id);
-    expect(forced).toEqual([row.path]);
+    expect(forced).toEqual([row.path!]);
     expect(service.getSnapshot().rows.find((candidate) => candidate.id === row.id)?.sizeKiB).toBe(
       9,
     );

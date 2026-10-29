@@ -42,7 +42,7 @@ export function selectRows(rows: WorktreeRow[], options: ViewOptions): WorktreeR
     .filter((row) => {
       if (
         search &&
-        !`${row.branch ?? ""}\n${row.path}\n${row.repoName}\n${row.tool}`
+        !`${row.branch ?? ""}\n${row.path ?? ""}\n${row.repoName}\n${row.tool}`
           .toLocaleLowerCase()
           .includes(search)
       )

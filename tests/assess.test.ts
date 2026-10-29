@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assess, MIN_AGE_MS } from "../src/core/assess";
+import { assess, markerNote, MIN_AGE_MS } from "../src/core/assess";
 import { parseWorktrunk } from "../src/core/worktrunk";
 import fixture from "./fixtures/list-v2.json";
 import type { WorktreeFacts } from "../src/core/types";
@@ -146,13 +146,106 @@ test.each([
   },
 );
 
-test.each(["🤖", "💬", "✅"])(
-  "agent marker %s does not affect Git cleanup eligibility",
-  (marker) => {
-    const payload = structuredClone(fixture);
-    Object.assign(payload.items[1]!, { marker });
-    const result = assess(parseWorktrunk("/repo", JSON.stringify(payload))[0]!);
-    expect(result.verdict).toBe("Safe");
-    expect(result.removalBlockReason).toBeNull();
+const marked = (marker: string | null, setBefore: number | null): Partial<WorktreeFacts> => ({
+  marker,
+  markerSetAt: setBefore === null ? null : new Date(now - setBefore).toISOString(),
+});
+
+test.each([
+  ["🤖", 20 * 60_000, "An agent was working here 20m ago."],
+  ["💬", 3 * 3_600_000, "An agent was waiting for input here 3h ago."],
+  ["🤖", null, "An agent was working here; when is unknown."],
+] as const)("an agent mark %s set %p ms ago turns Safe into Review", (marker, age, reason) => {
+  const result = assess({ ...base, ...marked(marker, age) }, now);
+  expect(result.verdict).toBe("Review");
+  expect(result.status).toBe("merged");
+  expect(result.reason).toBe(reason);
+  expect(result.removalBlockReason).toBeNull();
+  expect(markerNote({ ...base, ...marked(marker, age) }, now)).toBe(reason);
+});
+
+test("an agent mark older than a day leaves the verdict alone and reads as stale", () => {
+  const facts = { ...base, ...marked("🤖", 28 * MIN_AGE_MS) };
+  expect(assess(facts, now).verdict).toBe("Safe");
+  expect(markerNote(facts, now)).toBe("Agent mark from 28d ago, likely stale.");
+});
+
+test("any other marker only shows in the details", () => {
+  const facts = { ...base, ...marked("✅", 60_000) };
+  expect(assess(facts, now).verdict).toBe("Safe");
+  expect(markerNote(facts, now)).toBe("Marked ✅ 1m ago.");
+  expect(markerNote({ ...base, ...marked("✅", null) }, now)).toBe("Marked ✅.");
+  expect(markerNote({ ...base, ...marked(null, null) }, now)).toBeNull();
+});
+
+test("Busy, Broken and blocked verdicts outrank a recent agent mark", () => {
+  const mark = marked("🤖", 60_000);
+  expect(assess({ ...base, ...mark, operation: "rebase" }, now).verdict).toBe("Busy");
+  expect(assess({ ...base, ...mark, prunable: true }, now).verdict).toBe("Broken");
+  const locked = assess({ ...base, ...mark, locked: true, lockReason: "manual" }, now);
+  expect([locked.status, locked.removalBlockReason]).toEqual([
+    "locked",
+    "it's locked (manual); unlock it first",
+  ]);
+  const dirty = assess({ ...base, ...mark, changes: { ...base.changes!, modified: true } }, now);
+  expect(dirty.reason).toBe("Removing it deletes work that isn't committed.");
+});
+
+const leftover: WorktreeFacts = {
+  ...base,
+  id: "/repo\0branch\0old",
+  kind: "branch",
+  path: null,
+  branch: "old",
+  changes: null,
+  tool: "Other",
+};
+const branch = (update: Partial<WorktreeFacts>) => assess({ ...leftover, ...update }, now);
+
+test.each(["ancestor", "same_commit", "patch_id_match", "trees_match", "merge_adds_nothing"])(
+  "a merged branch without a worktree (%s) is Safe only once a day old",
+  (integrationReason) => {
+    const facts = { mainState: "integrated", integrationReason };
+    expect(branch({ ...facts, createdAt: createdBefore(MIN_AGE_MS) }).verdict).toBe("Safe");
+    const young = branch({ ...facts, createdAt: createdBefore(2 * 3_600_000) });
+    expect([young.verdict, young.reason, young.removalBlockReason]).toEqual([
+      "Review",
+      "Created 2h ago, so it may still be in use.",
+      null,
+    ]);
+    const unknown = branch({ ...facts, createdAt: null });
+    expect([unknown.verdict, unknown.reason]).toEqual([
+      "Review",
+      "Its creation time is unknown, so it may still be in use.",
+    ]);
   },
 );
+
+test.each([
+  ["ahead", "unmerged commits"],
+  ["would_conflict", "unmerged commits"],
+  ["diverged", "unmerged commits"],
+  ["orphan", "unrelated history"],
+])("a branch without a worktree that is %s needs review", (mainState, status) => {
+  const result = branch({ mainState, mainAhead: 2 });
+  expect([result.verdict, result.status, result.removalBlockReason]).toEqual([
+    "Review",
+    status,
+    null,
+  ]);
+});
+
+test("a branch without a worktree needs no files, but an unknown state still blocks it", () => {
+  expect(branch({ mainState: "integrated" }).status).toBe("merged");
+  expect(branch({ mainState: null }).removalBlockReason).toBe(
+    "its Git status is unknown; press r to rescan",
+  );
+});
+
+test("a recent agent mark keeps a merged branch without a worktree out of Safe", () => {
+  const result = branch({ mainState: "integrated", ...marked("💬", 5 * 60_000) });
+  expect([result.verdict, result.reason]).toEqual([
+    "Review",
+    "An agent was waiting for input here 5m ago.",
+  ]);
+});

@@ -1,5 +1,5 @@
 import type { RGBA } from "@opentui/core";
-import { assess } from "../core/assess";
+import { assess, markerNote, recentAgentMark } from "../core/assess";
 import { removalBlockReason, type RemovalEntry } from "../core/actions";
 import type { DashboardSnapshot, ToolName, Verdict, WorktreeRow } from "../core/types";
 import {
@@ -11,6 +11,7 @@ import {
   countLabel,
   homePath,
   porcelainPath,
+  rowsLabel,
   sizeLabel,
   upstreamLabel,
   statusLabel,
@@ -371,10 +372,7 @@ function projectCard(
     ];
   }
   const dirty = rows.filter((row) => row.changes && changesLabel(row) !== "clean").length;
-  const tools = (Object.keys(TOOL_NAMES) as ToolName[])
-    .map((tool) => [tool, rows.filter((row) => row.tool === tool).length] as const)
-    .filter(([, count]) => count)
-    .sort((a, b) => b[1] - a[1]);
+  const tools = toolCounts(rows);
   const time = (row: WorktreeRow) => Date.parse(row.committedAt ?? "");
   const oldest = rows
     .filter((row) => Number.isFinite(time(row)))
@@ -398,12 +396,28 @@ function projectCard(
     dirty
       ? [seg(`${countLabel(dirty, "worktree")} uncommitted`, { fg: theme.review })]
       : [seg("nothing uncommitted", { fg: theme.safe })],
-    [dim(clip(tools.map(([tool, count]) => `${TOOL_NAMES[tool]} ${count}`).join(" · "), width))],
+    [dim(clip(tools.map(([tool, count]) => `${tool} ${count}`).join(" · "), width))],
   );
   if (oldest) lines.push(named("oldest  ", agoLabel(oldest.committedAt, now), oldest));
   if (largest && largest.sizeKiB !== null)
     lines.push(named("largest ", sizeLabel(largest.sizeKiB), largest));
   return lines.map((line) => fitLine(line, width));
+}
+
+/** Branches without a worktree are counted apart: no tool is known to have made them. */
+function toolCounts(rows: WorktreeRow[]): Array<readonly [string, number]> {
+  const counts: Array<readonly [string, number]> = (Object.keys(TOOL_NAMES) as ToolName[])
+    .map(
+      (tool) =>
+        [
+          TOOL_NAMES[tool],
+          rows.filter((row) => row.kind === "worktree" && row.tool === tool).length,
+        ] as const,
+    )
+    .filter(([, count]) => count)
+    .sort((a, b) => b[1] - a[1]);
+  const branches = rows.filter((row) => row.kind === "branch").length;
+  return branches ? [...counts, ["no worktree", branches] as const] : counts;
 }
 
 function statusLine(state: UiState, ctx: RenderContext): Line {
@@ -440,7 +454,7 @@ function headerLine(
   const { snapshot, theme } = ctx;
   const progress = snapshot.progress;
   const total = rows.reduce((sum, row) => sum + (row.sizeKiB ?? 0), 0);
-  const unknown = rows.filter((row) => row.sizeKiB === null).length;
+  const unknown = rows.filter((row) => row.kind === "worktree" && row.sizeKiB === null).length;
   const status: Line =
     progress.phase === "scanning"
       ? [
@@ -462,7 +476,7 @@ function headerLine(
   if (place) title.push(dim(" › "), seg(place, { bold: true }));
   const parts: Record<SummaryPart, string> = {
     projects: projects === undefined ? "" : countLabel(projects, "project"),
-    worktrees: countLabel(rows.length, "worktree"),
+    worktrees: rowsLabel(rows),
     size: `up to ${sizeLabel(total)}`,
     sizing: unknown ? `${unknown} sizing` : "",
   };
@@ -561,7 +575,7 @@ const SECTION_TITLES: Record<Verdict, { icon: string; gloss: string }> = {
 function sectionHeader(section: Section, state: UiState, ctx: RenderContext): Line {
   const { theme, width } = ctx;
   const kib = section.rows.reduce((sum, row) => sum + (row.sizeKiB ?? 0), 0);
-  const summary = dim(`  ${countLabel(section.rows.length, "worktree")} · ${sizeLabel(kib)}`);
+  const summary = dim(`  ${rowsLabel(section.rows)} · ${sizeLabel(kib)}`);
   if (section.kind === "verdict") {
     const { icon, gloss } = SECTION_TITLES[section.verdict];
     const left: Line = [
@@ -643,10 +657,12 @@ function rowLine(
   }
   if (cols.age)
     parts.push(cell(ageLabel(row.committedAt, ctx.now), cols.age, { dim: true }, "right"));
-  parts.push(
-    cell(sizeLabel(row.sizeKiB), cols.size, { dim: row.sizeKiB === null || status?.done }, "right"),
-  );
+  parts.push(cell(rowSize(row), cols.size, { dim: row.sizeKiB === null || status?.done }, "right"));
   return fitLine(parts, ctx.width, focused ? { bg: theme.focusBg } : undefined);
+}
+
+function rowSize(row: WorktreeRow): string {
+  return row.kind === "branch" ? "branch" : sizeLabel(row.sizeKiB);
 }
 
 function reasonCell(row: WorktreeRow, width: number, color: RGBA): Line {
@@ -778,20 +794,23 @@ function worktreeSummary(
   if (!row) return [[dim("No worktree in view")]];
   const color = verdictColor(theme, row.verdict);
   const changes = changesLabel(row);
+  const commit = `last commit ${agoLabel(row.committedAt, now)}${row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""}`;
   const lines: Line[] = [
     [
       seg(branchLabel(row), { bold: true }),
       dim(state.screen.kind === "all" ? ` · ${row.repoName}  ` : "  "),
       seg(`● ${row.verdict} · ${statusLabel(row)}`, { fg: color }),
     ],
-    [dim(middle(homePath(row.path, home), width))],
-    [
-      dim(
-        `${TOOL_NAMES[row.tool]} · last commit ${agoLabel(row.committedAt, now)}${row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""} · `,
-      ),
-      seg(changes, { fg: changes === "clean" ? theme.safe : theme.review }),
-      dim(` · ${upstreamLabel(row)}`),
-    ],
+    row.path === null
+      ? [dim(`Branch without a worktree · created ${agoLabel(row.createdAt, now)}`)]
+      : [dim(middle(homePath(row.path, home), width))],
+    row.path === null
+      ? [dim(`${commit} · ${upstreamLabel(row)}`)]
+      : [
+          dim(`${TOOL_NAMES[row.tool]} · ${commit} · `),
+          seg(changes, { fg: changes === "clean" ? theme.safe : theme.review }),
+          dim(` · ${upstreamLabel(row)}`),
+        ],
   ];
   const failure = state.failures[row.id];
   if (failure)
@@ -799,7 +818,10 @@ function worktreeSummary(
   const blocked = ctx.canAct && !inJob(state, row.id) ? removalBlockReason(row) : null;
   if (blocked && row.verdict !== "Broken")
     lines.push([seg(clip(`Can't be removed: ${blocked}`, width), { fg: theme.review })]);
-  if (ctx.canAct) lines.push(...pad(summaryFiles(row, state, ctx, width), SUMMARY_FILE_LINES));
+  if (ctx.canAct && row.kind === "worktree")
+    lines.push(...pad(summaryFiles(row, state, ctx, width), SUMMARY_FILE_LINES));
+  const mark = markerNote(row, now);
+  if (mark) lines.push([dim(clip(mark, width))]);
   return lines;
 }
 
@@ -928,31 +950,42 @@ function detailLines(
     ...wrap(assessment.reason, width - 2).map((text) => [dim(`  ${text}`)]),
     [],
     [dim("PATH")],
-    ...wrap(homePath(row.path, ctx.home), width).map((text) => [seg(text)]),
+    ...(row.path === null
+      ? [[dim("none; a branch without a worktree")]]
+      : wrap(homePath(row.path, ctx.home), width).map((text) => [seg(text)])),
     [],
-    ...field("CREATED BY", TOOL_NAMES[row.tool], width),
+    ...(row.path === null
+      ? field("CREATED", agoLabel(row.createdAt, now), width)
+      : field("CREATED BY", TOOL_NAMES[row.tool], width)),
     ...field(
       "LAST COMMIT",
       agoLabel(row.committedAt, now) + (row.headSha ? ` · ${row.headSha.slice(0, 7)}` : ""),
       width,
     ),
-    ...field(
-      "CHANGES",
-      changesLabel(row),
-      width,
-      changesLabel(row) === "clean" ? { fg: theme.safe } : { fg: theme.review },
-    ),
+    ...(row.path === null
+      ? []
+      : field(
+          "CHANGES",
+          changesLabel(row),
+          width,
+          changesLabel(row) === "clean" ? { fg: theme.safe } : { fg: theme.review },
+        )),
     ...field("UPSTREAM", upstreamLabel(row), width),
     ...(row.locked && assessment.status !== "locked"
       ? field("LOCK", row.lockReason ?? "no lock reason supplied", width)
       : []),
-    ...field(
-      "SIZE",
-      `${sizeLabel(row.sizeKiB)} · ${row.sizeMeasuredAt ? `measured ${agoLabel(row.sizeMeasuredAt, now)}` : "measuring…"}`,
-      width,
-    ),
+    ...(row.path === null
+      ? []
+      : field(
+          "SIZE",
+          `${sizeLabel(row.sizeKiB)} · ${row.sizeMeasuredAt ? `measured ${agoLabel(row.sizeMeasuredAt, now)}` : "measuring…"}`,
+          width,
+        )),
   ];
-  if (ctx.canAct) lines.push([], ...filesSection(row, state, ctx, width));
+  const mark = markerNote(row, now);
+  if (mark) lines.push(...field("MARK", mark, width));
+  if (ctx.canAct && row.kind === "worktree")
+    lines.push([], ...filesSection(row, state, ctx, width));
   lines.push([]);
   const failure = state.failures[row.id];
   const status = removalStatus(state, row.id, theme);
@@ -1102,8 +1135,8 @@ function sizeColumn(
     title,
     width,
     cell: (project) => {
-      const known = project.rows.length - project.unsized;
-      if (project.pending || (project.rows.length && !known)) return pendingCell(width);
+      if (project.pending || (project.worktrees && project.worktrees === project.unsized))
+        return pendingCell(width);
       if (!rowsCovered(project)) return cell("·", width, { dim: true }, "right");
       return cell(sizeLabel(kib(project)), width, { dim: project.unsized > 0 }, "right");
     },
@@ -1116,7 +1149,7 @@ const WORKTREES_COLUMN: ProjectColumn = {
   cell: (project) =>
     project.pending
       ? cell(project.linked === null ? "…" : String(project.linked), 11, { dim: true }, "right")
-      : cell(String(project.rows.length), 11, {}, "right"),
+      : cell(String(project.worktrees), 11, {}, "right"),
 };
 const SAFE_SIZE_COLUMN = sizeColumn(
   "SAFE SIZE",
@@ -1132,7 +1165,7 @@ const SIDEBAR_FREE = sizeColumn(
 const TOTAL_COLUMN = sizeColumn(
   "TOTAL",
   (project) => project.totalKiB,
-  (project) => project.rows.length,
+  (project) => project.worktrees,
 );
 const VERDICT_COLUMNS = [
   countColumn("Safe", "SAFE"),
@@ -1286,10 +1319,7 @@ function projectDetails(view: ProjectsView, ctx: RenderContext, width: number): 
   const rows = project.rows;
   if (!rows.length)
     return [...lines, [dim(project.pending ? "Listing worktrees…" : "No worktrees")]];
-  const tools = (Object.keys(TOOL_NAMES) as ToolName[])
-    .map((tool) => [tool, rows.filter((row) => row.tool === tool).length] as const)
-    .filter(([, count]) => count)
-    .sort((a, b) => b[1] - a[1]);
+  const tools = toolCounts(rows);
   const dirty = rows.filter((row) => row.changes && changesLabel(row) !== "clean").length;
   const time = (row: WorktreeRow) => Date.parse(row.committedAt ?? "");
   const oldest = rows
@@ -1316,11 +1346,7 @@ function projectDetails(view: ProjectsView, ctx: RenderContext, width: number): 
       width,
       dirty ? { fg: theme.review } : { fg: theme.safe },
     ),
-    ...field(
-      "MADE BY",
-      tools.map(([tool, count]) => `${TOOL_NAMES[tool]} ${count}`).join(" · "),
-      width,
-    ),
+    ...field("MADE BY", tools.map(([tool, count]) => `${tool} ${count}`).join(" · "), width),
   );
   if (oldest)
     lines.push(
@@ -1394,6 +1420,15 @@ function removeDialog(
   const notes: Line[] = [];
   const dirty = ready.filter((entry) => entry.requiresDiscard);
   const warn = (text: string) => wrap(text, inner).map((part) => [seg(part, { fg: theme.review })]);
+  const marked = ready.filter((entry) => recentAgentMark(entry.row));
+  if (marked.length)
+    notes.push(
+      ...warn(
+        marked.length === 1
+          ? `! ${names(marked)}: ${recentAgentMark(marked[0]!.row)}`
+          : `! Agents were recently active in ${names(marked)}`,
+      ),
+    );
   if (dirty.length) notes.push(...warn(`! Discards uncommitted changes in ${names(dirty)}`));
   if (blocked.length) {
     notes.push(
@@ -1404,7 +1439,7 @@ function removeDialog(
       ),
     );
   }
-  if (!dirty.length && !blocked.length)
+  if (!dirty.length && !blocked.length && ready.some((entry) => entry.row.kind === "worktree"))
     notes.push(
       ...wrap("Nothing uncommitted. Ignored files and caches go with them.", inner).map((text) => [
         dim(text),
@@ -1412,6 +1447,9 @@ function removeDialog(
     );
   const unmerged = ready.filter((entry) => entry.branchWillBeRetained);
   const merged = ready.filter((entry) => entry.row.branch !== null && !entry.branchWillBeRetained);
+  const bare = unmerged.filter((entry) => entry.row.kind === "branch");
+  if (bare.length && !confirm.deleteUnmerged)
+    notes.push(...warn(`! Skips ${names(bare)} unless you press D: not merged, and no worktree`));
   const options: Line[] = [];
   if (unmerged.length) {
     const count = countLabel(unmerged.length, "unmerged branch", "unmerged branches");
@@ -1442,11 +1480,11 @@ function removeDialog(
       entry.requiresDiscard ? { fg: theme.review } : {},
     ),
     cell(entry.row.repoName, repoWidth, { dim: true }),
-    cell(sizeLabel(entry.row.sizeKiB), sizeWidth, { dim: true }, "right"),
+    cell(rowSize(entry.row), sizeWidth, { dim: true }, "right"),
   ]);
   if (shown.length < ready.length) rows.push([dim(`  +${ready.length - shown.length} more`)]);
   return {
-    title: `Remove ${countLabel(ready.length, "worktree")} · up to ${sizeLabel(kib)}?`,
+    title: `Remove ${rowsLabel(ready.map((entry) => entry.row))} · up to ${sizeLabel(kib)}?`,
     content: [...rows, ...tail],
     answer: buttons(theme, `Remove ${ready.length}`),
   };

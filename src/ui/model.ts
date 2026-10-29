@@ -9,7 +9,7 @@ import {
 } from "../core/actions";
 import { groupByRepo, selectRows } from "../core/view";
 import type { DashboardSnapshot, Verdict, WorktreeRow } from "../core/types";
-import { branchLabel, countLabel, sizeLabel } from "./format";
+import { branchLabel, countLabel, rowsLabel, sizeLabel } from "./format";
 
 export type Tab = "All" | "Safe" | "Review" | "Busy" | "Broken";
 export const TABS: Tab[] = ["All", "Safe", "Review", "Busy", "Broken"];
@@ -200,10 +200,14 @@ export interface ListView {
 export interface Project {
   repoPath: string;
   repoName: string;
+  /** Worktrees and branches without a worktree. */
   rows: WorktreeRow[];
+  /** Rows that are worktrees; only these have a size. */
+  worktrees: number;
   counts: Record<Verdict, number>;
   totalKiB: number;
   safeKiB: number;
+  /** Worktrees not measured yet. */
   unsized: number;
   linked: number | null;
   pending: boolean;
@@ -232,16 +236,19 @@ function summarize(
   rest: Pick<Project, "linked" | "pending" | "error">,
 ): Project {
   const counts: Record<Verdict, number> = { Safe: 0, Review: 0, Busy: 0, Broken: 0 };
+  let worktrees = 0;
   let totalKiB = 0;
   let safeKiB = 0;
   let unsized = 0;
   for (const row of rows) {
     counts[row.verdict]++;
+    if (row.kind === "branch") continue;
+    worktrees++;
     if (row.sizeKiB === null) unsized++;
     totalKiB += row.sizeKiB ?? 0;
     if (row.verdict === "Safe") safeKiB += row.sizeKiB ?? 0;
   }
-  return { repoPath, repoName: name, rows, counts, totalKiB, safeKiB, unsized, ...rest };
+  return { repoPath, repoName: name, rows, worktrees, counts, totalKiB, safeKiB, unsized, ...rest };
 }
 
 export function projectsView(state: UiState, snapshot: DashboardSnapshot): ProjectsView {
@@ -281,7 +288,7 @@ export function projectsView(state: UiState, snapshot: DashboardSnapshot): Proje
 }
 
 export function worktreeCount(project: Project): number {
-  return project.pending ? (project.linked ?? 0) : project.rows.length;
+  return project.pending ? (project.linked ?? 0) : project.worktrees;
 }
 
 function soleProject(snapshot: DashboardSnapshot): string | null {
@@ -541,14 +548,14 @@ function finishJob(
   if (!job) return same(state);
   const failures = { ...state.failures };
   const gone = new Set(state.gone);
-  let removed = 0;
+  const removed: WorktreeRow[] = [];
   let freed = 0;
   const problems: string[] = [];
   for (const item of result?.items ?? []) {
     if (!job.order.includes(item.id)) continue;
     const row = job.plan.entries.find((entry) => entry.row.id === item.id)!.row;
     if (item.status === "removed") {
-      removed++;
+      removed.push(row);
       freed += row.sizeKiB ?? 0;
       gone.add(item.id);
       delete failures[item.id];
@@ -569,10 +576,10 @@ function finishJob(
     summary = `Removal stopped: ${error}`;
     tone = "error";
   } else if (!problems.length) {
-    summary = `Removed ${countLabel(removed, "worktree")} · ${space}`;
+    summary = `Removed ${rowsLabel(removed)} · ${space}`;
     tone = "ok";
   } else {
-    summary = `Removed ${removed} of ${job.order.length} · ${problems.length === 1 ? problems[0] : `${problems.length} worktrees`} not removed, see details`;
+    summary = `Removed ${removed.length} of ${job.order.length} · ${problems.length === 1 ? problems[0] : `${problems.length} worktrees`} not removed, see details`;
     tone = "warn";
   }
   const repos = [
@@ -750,6 +757,7 @@ function onConfirmKey(state: UiState, confirm: Confirm, key: Key, ctx: Context):
     };
   }
   const order = confirm.ready.map((entry) => entry.row.id);
+  const queued = confirm.ready.map((entry) => entry.row);
   const failures = { ...state.failures };
   for (const id of order) delete failures[id];
   const token = state.token + 1;
@@ -772,13 +780,7 @@ function onConfirmKey(state: UiState, confirm: Confirm, key: Key, ctx: Context):
   const focused = keepFocusNear(next, state, ctx);
   return {
     state: waitsForRunningBatch
-      ? toast(
-          focused,
-          ctx,
-          `Queued ${countLabel(order.length, "worktree")} after the current removal`,
-          "info",
-          3000,
-        )
+      ? toast(focused, ctx, `Queued ${rowsLabel(queued)} after the current removal`, "info", 3000)
       : focused,
     effects: [{ type: "executeRemoval", jobId: job.id, plan: confirm.plan, choices }],
   };
@@ -853,6 +855,8 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
   if (key.char === "r") return { state, effects: [{ type: "refresh" }] };
   if (key.char === "R") {
     if (!focus) return same(state);
+    if (focus.kind === "branch")
+      return same(toast(state, ctx, "A branch without a worktree has no folder to measure"));
     return {
       state: toast(state, ctx, `Measuring ${branchLabel(focus)}…`, "info", 2500),
       effects: [{ type: "remeasure", id: focus.id }],
@@ -919,18 +923,14 @@ function selectAllSafe(
   const selected = new Set(state.selected);
   if (safe.every((row) => selected.has(row.id))) {
     for (const row of safe) selected.delete(row.id);
-    return toast(
-      { ...state, selected },
-      ctx,
-      `Cleared ${countLabel(safe.length, "Safe worktree")}${where}`,
-    );
+    return toast({ ...state, selected }, ctx, `Cleared ${rowsLabel(safe, "Safe")}${where}`);
   }
   for (const row of safe) selected.add(row.id);
   const kib = safe.reduce((sum, row) => sum + (row.sizeKiB ?? 0), 0);
   return toast(
     { ...state, selected },
     ctx,
-    `Selected ${countLabel(safe.length, "Safe worktree")}${where} · up to ${sizeLabel(kib)}`,
+    `Selected ${rowsLabel(safe, "Safe")}${where} · up to ${sizeLabel(kib)}`,
     "ok",
   );
 }
@@ -956,7 +956,7 @@ function startRemoval(state: UiState, focus: WorktreeRow | null, ctx: Context): 
       pending: {
         kind: "removal",
         token,
-        label: `Checking ${countLabel(rows.length, "worktree")}…`,
+        label: `Checking ${rowsLabel(rows)}…`,
       },
     },
     effects: [{ type: "prepareRemoval", token, rows }],

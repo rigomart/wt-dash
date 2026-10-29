@@ -24,6 +24,9 @@ function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}):
     headSha: "abcdef1",
     committedAt: "2026-09-28T00:00:00Z",
     createdAt: "2026-09-27T00:00:00Z",
+    kind: "worktree",
+    marker: null,
+    markerSetAt: null,
     tool: "Claude",
     changes: {
       staged: false,
@@ -563,4 +566,24 @@ test("projects are ordered by how many worktrees they have, then by name", () =>
   ]);
   const view = projectsView(initialState(), ctx.snapshot);
   expect(view.projects.map((project) => project.repoName)).toEqual(["beta", "alpha", "gamma"]);
+});
+
+test("branches without a worktree are selectable but not counted as worktrees or sized", () => {
+  const leftover = row("old", 0, {
+    kind: "branch",
+    path: null,
+    changes: null,
+    sizeKiB: null,
+    tool: "Other",
+  });
+  const ctx = context([row("a", 10), leftover]);
+  const project = projectsView(initialState(), ctx.snapshot).projects[0]!;
+  expect([project.rows.length, project.worktrees, project.unsized, project.counts.Safe]).toEqual([
+    2, 1, 0, 2,
+  ]);
+  let state = press(openedWorktreeList(ctx), ctx, "a");
+  expect([...state.selected].sort()).toEqual(["a", "old"]);
+  expect(state.toast?.text).toBe("Selected 1 Safe worktree and 1 branch · up to 10 KB");
+  state = press(state, ctx, "j", "R");
+  expect(state.toast?.text).toBe("A branch without a worktree has no folder to measure");
 });

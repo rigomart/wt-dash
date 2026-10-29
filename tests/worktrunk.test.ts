@@ -59,3 +59,55 @@ test("preserves full lock reason and Worktrunk commit count", () => {
     defaultBranch: "main",
   });
 });
+
+describe("branches without a worktree", () => {
+  const payload: any = structuredClone(fixture);
+  payload.items.push(
+    {
+      branch: "old-feature",
+      head: { sha: "ddd", committed_at: "2026-09-20T00:00:00Z" },
+      default_branch: { ahead: 0, behind: 3, integration: { reason: "ancestor" } },
+      upstream: { ahead: 0, behind: 0 },
+      display: { state: "integrated" },
+    },
+    // The default branch shows up here when no worktree has it checked out.
+    { branch: "main", head: { sha: "aaa" }, display: { state: "is_main" } },
+    { head: { sha: "eee" }, display: { state: "ahead" } },
+  );
+
+  test("become branch rows with no folder, and the default branch is left out", () => {
+    const rows = parseWorktrunk(repo, JSON.stringify(payload));
+    expect(rows.map((row) => [row.kind, row.branch])).toEqual([
+      ["worktree", "feature/name"],
+      ["worktree", null],
+      ["branch", "old-feature"],
+    ]);
+    expect(rows[2]).toMatchObject({
+      path: null,
+      changes: null,
+      headSha: "ddd",
+      mainState: "integrated",
+      integrationReason: "ancestor",
+      upstreamAhead: 0,
+      locked: false,
+      prunable: false,
+      operation: null,
+    });
+  });
+
+  test("ids cannot collide with a worktree whose folder has the branch's name", () => {
+    const same: any = structuredClone(payload);
+    same.items[1].worktree.path = `${repo}/branch/old-feature`;
+    const ids = parseWorktrunk(repo, JSON.stringify(same)).map((row) => row.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("keep Worktrunk's marker without a time, which the JSON does not carry", () => {
+    const marked: any = structuredClone(payload);
+    marked.items[1].marker = "🤖";
+    expect(parseWorktrunk(repo, JSON.stringify(marked))[0]).toMatchObject({
+      marker: "🤖",
+      markerSetAt: null,
+    });
+  });
+});

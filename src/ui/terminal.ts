@@ -163,7 +163,7 @@ export async function runTerminal(
   function scheduleInspect(): void {
     if (!actions) return;
     const row = listView(state, snapshot).focus;
-    if (!row || state.files[row.id]) return;
+    if (!row || row.kind === "branch" || state.files[row.id]) return;
     if (inspectTimer) clearTimeout(inspectTimer);
     const generation = state.generation;
     inspectTimer = setTimeout(() => {
