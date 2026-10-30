@@ -1,6 +1,6 @@
 # Remove dialog and removal
 
-Enter or `x` opens one confirmation dialog listing each row and its size, the total, which rows would lose uncommitted changes, and what happens to branches and processes. `D` toggles deleting unmerged branches, `e` toggles leaving processes running. `y` or Enter confirms, Esc cancels. Removal runs in the background, and every attempt is logged to `~/.cache/wt-dash/removals.log` (the instance's HOME).
+Enter or `x` opens one confirmation dialog listing each row and its size, the total, which rows would lose uncommitted changes or ignored files that aren't caches, and what happens to branches and processes. `D` toggles deleting unmerged branches, `e` toggles leaving processes running. `y` or Enter confirms, Esc cancels. Removal runs in the background, and every attempt is logged to `~/.cache/wt-dash/removals.log` (the instance's HOME).
 
 ## Entry points and variants
 
@@ -14,7 +14,7 @@ Enter or `x` opens one confirmation dialog listing each row and its size, the to
 
 ## Checks
 
-1. Space on `api › feature/assets`, then `x`: the dialog title is `Remove 1 worktree · up to 12.0 MB?`, it lists `• feature/assets  api  12.0 MB`, and reads `Nothing uncommitted. Ignored files and caches go with them.`, `Merged branches are deleted.`, `Stops processes running inside  e leave them`, and `Remove 1  y / enter    [ Cancel  esc ]`.
+1. Space on `api › feature/assets` (fresh seed: its only ignored paths are caches), then `x`: the dialog title is `Remove 1 worktree · up to 12.0 MB?`, it lists `• feature/assets  api  12.0 MB`, shows no `Deletes ignored files` note, and reads `Nothing uncommitted. Ignored files and caches go with them.`, `Merged branches are deleted.`, `Stops processes running inside  e leave them`, and `Remove 1  y / enter    [ Cancel  esc ]`.
 2. `e` turns the line into `Processes inside keep running  e stop them`; `e` again restores it.
 3. Esc closes the dialog and keeps the selection (`■ 1 selected`).
 4. With `feature/dirty-form` also selected the dialog shows `! Discards uncommitted changes in feature/dirty-form`.
@@ -22,7 +22,8 @@ Enter or `x` opens one confirmation dialog listing each row and its size, the to
 6. `y` removes: the status line (line 31 wide, 23 narrow) shows `Removing 1 of 1: feature/assets` with a spinner, then `✓ Removed 1 worktree · freed 12.0 MB`; the row is gone and the tabs count one fewer.
 7. `state` shows the worktree gone from `git worktree list` and its branch gone from `git branch`; the last `removalsLog` entry has that branch, `exitCode: 0`, `branchOutcome: "deleted"`, and `flags: ["--reap"]` (or `[]` when `e` left processes running; a dirty worktree adds `"-f"`).
 8. A worktree with uncommitted changes on a branch that `main` has moved past (Worktrunk lists it `behind`, integration reason `ancestor`; arrange it with Git as in [rescan.md](rescan.md): a worktree on a new branch from `main`, a commit on `main`, an edit in the worktree, then `r`): its dialog reads `Merged branches are deleted.`, not `Keeps 1 unmerged branch`, and after `y` the branch is gone from `git branch` and the `removalsLog` entry has `flags: ["-f", "--reap"]` and `branchOutcome: "deleted"` (#23).
-9. The developer's own `~/.cache/wt-dash/removals.log` is unchanged (compare its `ls -l` before and after).
+9. Ignored files that aren't caches are named (#45). Arrange them as the instance's user: `git config --global core.excludesFile "$HOME/.gitignore_global"` with `.env*` and `*.db` in that file, then create `.env.local`, `.env.prod`, `.env.test` and `dev.db` in `api`'s `feature/assets` worktree (under `paths.worktrees`; it already holds `node_modules/` and `dist/`) and `dev.db` in `feature/login`, and press `r`. With only `feature/assets` selected the dialog shows `! Deletes ignored files in feature/assets: .env.local, .env.prod +2 more` (two names, then the rest counted), keeps `Nothing uncommitted. Ignored files and caches go with them.`, and never mentions `node_modules` or `dist`. With `feature/login` also selected the note reads `! Deletes ignored files in feature/assets and feature/login`, and past two worktrees it shortens like the uncommitted note. `web › feature/bundle`, whose only ignored paths are `node_modules/` and `dist/`, shows no such note. Check wide and narrow; `y` still removes (`flags: ["--reap"]`).
+10. The developer's own `~/.cache/wt-dash/removals.log` is unchanged (compare its `ls -l` before and after).
 
 ## Traps
 
