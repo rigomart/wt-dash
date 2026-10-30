@@ -189,6 +189,16 @@ export function scanProgress(state: UiState, ctx: RenderContext): Line[] {
   return lines;
 }
 
+function emptyScan({ scanned, home, width }: RenderContext): Line[] {
+  const folders = scanned.map((folder) => homePath(folder, home));
+  const found = folders.length
+    ? `No worktrees found in ${folders.length > 1 ? `${folders.slice(0, -1).join(", ")} and ` : ""}${folders.at(-1)}.`
+    : "No worktrees found, and no folder to scan exists.";
+  return [...wrap(found, width - 4), "Scan other folders with: wt-dash <folder>"].map((text) => [
+    dim(`  ${text}`),
+  ]);
+}
+
 function projectsBody(
   state: UiState,
   view: ProjectsView,
@@ -197,7 +207,7 @@ function projectsBody(
   viewport: Viewport,
 ): { lines: Line[]; below: number } {
   if (!projectsReady(state, ctx.snapshot)) return { lines: scanProgress(state, ctx), below: 0 };
-  if (!view.projects.length) return { lines: [[], [dim("  No worktrees found.")]], below: 0 };
+  if (!view.projects.length) return { lines: [[], ...emptyScan(ctx)], below: 0 };
   const cols = projectColumns(ctx.width);
   const lines = view.entries.map((project) =>
     projectLine(project, cols, state, ctx, project === view.focus),

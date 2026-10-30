@@ -86,15 +86,32 @@ export const TOOL_NAMES: Record<ToolName, string> = {
   Other: "other",
 };
 
+export interface AgentFolder {
+  tool: ToolName;
+  /** Relative to the home folder. */
+  folder: string;
+  /** The fewest and most folder levels below `folder` a worktree sits at. */
+  levels: readonly [number, number];
+}
+
 /** Cursor and Superset document only their base folder, so one or two levels below it match. */
+export const AGENT_FOLDERS: readonly AgentFolder[] = [
+  { tool: "t3", folder: ".t3/worktrees", levels: [2, 2] },
+  { tool: "t3", folder: ".t3-lines/lines/worktrees", levels: [1, 2] },
+  { tool: "Codex", folder: ".codex/worktrees", levels: [2, 2] },
+  { tool: "Cursor", folder: ".cursor/worktrees", levels: [1, 2] },
+  { tool: "Conductor", folder: "conductor/workspaces", levels: [2, 2] },
+  { tool: "Windsurf", folder: ".windsurf/worktrees", levels: [2, 2] },
+  { tool: "ClaudeSquad", folder: ".claude-squad/worktrees", levels: [1, 1] },
+  { tool: "Superset", folder: ".superset/worktrees", levels: [1, 2] },
+];
+
 const TOOL_LAYOUTS: Array<readonly [RegExp, ToolName]> = [
-  [/\/\.t3\/worktrees\/[^/]+\/[^/]+$/, "t3"],
-  [/\/\.cursor\/worktrees\/[^/]+(\/[^/]+)?$/, "Cursor"],
-  [/\/conductor\/workspaces\/[^/]+\/[^/]+$/, "Conductor"],
-  [/\/\.windsurf\/worktrees\/[^/]+\/[^/]+$/, "Windsurf"],
+  ...AGENT_FOLDERS.map(
+    ({ tool, folder, levels: [fewest, most] }) =>
+      [new RegExp(`/${folder.replaceAll(".", "\\.")}(/[^/]+){${fewest},${most}}$`), tool] as const,
+  ),
   [/\/\.gemini\/worktrees\/[^/]+$/, "Gemini"],
-  [/\/\.claude-squad\/worktrees\/[^/]+$/, "ClaudeSquad"],
-  [/\/\.superset\/worktrees\/[^/]+(\/[^/]+)?$/, "Superset"],
 ];
 
 export function toolForPath(path: string, repoPath: string): ToolName {

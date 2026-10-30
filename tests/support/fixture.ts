@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { createServices } from "../../src/app";
 import type { ActionService } from "../../src/core/removal/types";
-import { discoverRepos, readCreatedAt } from "../../src/core/scan/discovery";
+import { discoverRepos, readCreatedAt, type RepoSource } from "../../src/core/scan/discovery";
 import type {
   CommandResult,
   CommandRunner,
@@ -134,9 +134,9 @@ export interface Sandbox {
   repo(name: string): Promise<Repo>;
   /**
    * Dashboard, action and size services on the sandbox; `cleanup` closes any still open. `runner` replaces the
-   * sandbox runner, for wrappers from tests/support/runners.ts.
+   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root.
    */
-  services(options?: { runner?: CommandRunner }): Promise<Services>;
+  services(options?: { runner?: CommandRunner; sources?: RepoSource[] }): Promise<Services>;
   /** Closes services, removes every worktree of the sandbox's repos, then the sandbox. Safe to call twice. */
   cleanup(): Promise<void>;
 }
@@ -590,10 +590,12 @@ export async function createSandbox(
     };
   }
 
-  async function services(options: { runner?: CommandRunner } = {}): Promise<Services> {
+  async function services(
+    options: { runner?: CommandRunner; sources?: RepoSource[] } = {},
+  ): Promise<Services> {
     const app = await createServices({
       home,
-      roots: [scanRoot],
+      sources: options.sources ?? [{ kind: "scan", folder: scanRoot }],
       depth: 2,
       wtPath,
       runner: options.runner ?? runner,

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { KeyEvent } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
+import type { RepoSource } from "../../src/core/scan/discovery";
 import type { CommandRunner } from "../../src/core/types";
 import { runTerminal } from "../../src/ui/terminal";
 import { sizeLabel } from "../../src/ui/format";
@@ -54,17 +55,26 @@ const matches = (frame: string, match: FrameMatch): boolean =>
       ? match.test(frame)
       : match(frame);
 
-/** Starts the real runTerminal on the sandbox's real services, in an OpenTUI test renderer. */
+/**
+ * Starts the real runTerminal on the sandbox's real services, in an OpenTUI test renderer. `sources` replaces the
+ * scan root, as from prepareStartup.
+ */
 export async function startApp(
   sandbox: Sandbox,
-  { width, height = 40, runner }: { width: number; height?: number; runner?: CommandRunner },
+  {
+    width,
+    height = 40,
+    runner,
+    sources,
+  }: { width: number; height?: number; runner?: CommandRunner; sources?: RepoSource[] },
 ): Promise<App> {
-  const services = await sandbox.services({ runner });
+  const services = await sandbox.services({ runner, sources });
   const setup = await createTestRenderer({ width, height });
   const running = runTerminal(services.dashboard, {
     renderer: setup.renderer,
     actions: services.actions,
     home: sandbox.home,
+    scanned: (sources ?? [{ folder: sandbox.scanRoot }]).map(({ folder }) => folder),
   });
   const frames: string[] = [];
   let closed = false;
@@ -177,7 +187,13 @@ export async function startApp(
  */
 export async function withApp(
   sandbox: Sandbox,
-  options: { width: number; height?: number; runner?: CommandRunner; name: string },
+  options: {
+    width: number;
+    height?: number;
+    runner?: CommandRunner;
+    sources?: RepoSource[];
+    name: string;
+  },
   body: (app: App) => Promise<void>,
 ): Promise<void> {
   const app = await startApp(sandbox, options);

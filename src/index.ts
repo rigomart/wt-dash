@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { homedir } from "node:os";
 import { help, parseArgs, version } from "./cli";
-import { platformName, prepareStartup } from "./startup";
+import { doctorSources, platformName, prepareStartup } from "./startup";
 import { createServices } from "./app";
 import { runCommand } from "./core/process";
 
@@ -16,10 +16,10 @@ async function main(): Promise<void> {
     console.log(version);
     return;
   }
-  const ready = await prepareStartup(options);
+  const ready = await prepareStartup(options, { home });
   if (options.mode === "doctor") {
     console.log(
-      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\nScan folders:\n${ready.roots.map((root) => `  ${root}`).join("\n")}\nSearch depth: ${options.depth}\nSetup checks passed.`,
+      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\n${await doctorSources(ready.sources, options)}\nSearch depth: ${options.depth}\nSetup checks passed.`,
     );
     return;
   }
@@ -30,13 +30,17 @@ async function main(): Promise<void> {
   const { runTerminal } = await import("./ui/terminal");
   const { dashboard, actions, close } = await createServices({
     home,
-    roots: ready.roots,
+    sources: ready.sources,
     depth: options.depth,
     wtPath: ready.wtPath,
     runner: runCommand,
   });
   try {
-    await runTerminal(dashboard, { actions });
+    await runTerminal(dashboard, {
+      actions,
+      home,
+      scanned: ready.sources.map(({ folder }) => folder),
+    });
   } finally {
     await close();
   }

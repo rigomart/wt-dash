@@ -21,7 +21,13 @@ const INSPECT_DELAY_MS = 150;
 
 export async function runTerminal(
   service: DashboardService,
-  options: { renderer?: CliRenderer; actions?: ActionService; home?: string } = {},
+  options: {
+    renderer?: CliRenderer;
+    actions?: ActionService;
+    home?: string;
+    /** The folders the scan searched, named when it finds nothing. */
+    scanned?: string[];
+  } = {},
 ): Promise<void> {
   const renderer = options.renderer ?? (await createCliRenderer({ exitOnCtrlC: false }));
   const screen = new TextRenderable(renderer, {
@@ -57,6 +63,7 @@ export async function runTerminal(
       now: Date.now(),
       theme,
       home,
+      scanned: options.scanned ?? [],
       canAct: actions !== undefined,
     };
   }

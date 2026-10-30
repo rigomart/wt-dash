@@ -9,6 +9,7 @@ export interface RenderContext {
   now: number;
   theme: Theme;
   home: string;
+  scanned: string[];
   canAct: boolean;
 }
 

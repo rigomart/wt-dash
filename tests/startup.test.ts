@@ -30,7 +30,7 @@ test("finds dependencies on PATH and deduplicates resolved scan folders", async 
   const { root, bin } = await environment();
   const options = parseArgs([root, root], root, root);
   const ready = await prepareStartup(options, { platform: "darwin", path: bin });
-  expect(ready.roots).toEqual([root]);
+  expect(ready.sources).toEqual([{ kind: "scan", folder: root }]);
   expect(ready.wtPath).toBe(join(bin, "wt"));
   expect(ready.gitVersion).toContain("2.50.0");
 });
@@ -89,4 +89,33 @@ test("runs on Linux and suggests a package manager when Git is missing", async (
   await expect(
     prepareStartup(parseArgs([root], root, root), { platform: "linux", path: bin }),
   ).rejects.toThrow("package manager");
+});
+
+test("with no folder given, skips missing default folders and adds the agents' worktree folders that exist", async () => {
+  const { root, bin } = await environment();
+  await mkdir(join(root, "code"));
+  await mkdir(join(root, ".codex", "worktrees"), { recursive: true });
+  await mkdir(join(root, ".cursor", "worktrees"), { recursive: true });
+  const ready = await prepareStartup(parseArgs([], root, root), {
+    platform: "darwin",
+    path: bin,
+    home: root,
+  });
+  expect(ready.sources).toEqual([
+    { kind: "scan", folder: join(root, "code") },
+    { kind: "agent", folder: join(root, ".codex", "worktrees"), levels: [2, 2] },
+    { kind: "agent", folder: join(root, ".cursor", "worktrees"), levels: [1, 2] },
+  ]);
+  const none = await prepareStartup(parseArgs([], join(root, "empty"), root), {
+    platform: "darwin",
+    path: bin,
+    home: join(root, "empty"),
+  });
+  expect(none.sources).toEqual([]);
+  const given = await prepareStartup(parseArgs([join(root, "code")], root, root), {
+    platform: "darwin",
+    path: bin,
+    home: root,
+  });
+  expect(given.sources).toEqual([{ kind: "scan", folder: join(root, "code") }]);
 });
