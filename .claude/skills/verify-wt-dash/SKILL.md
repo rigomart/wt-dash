@@ -53,6 +53,8 @@ There are no users. The data is the seed, built by `tests/support/fixture.ts` wi
 
 The list's AGE column (`now`, `3d`) is the age of the row's last commit, not of the worktree; verdict reasons such as "Created just now" use when the worktree was created. So `feature/new-endpoint`, made at seed time on top of a main commit dated 3 days back, reads `3d` beside `Created just now, so it may s…`: expected, and `i` shows the same split (`LAST COMMIT   3d ago`). The worktrees made by the fixture's squash-merge builders read `now` because their own commits are new.
 
+`up --seed <file>` builds the sandbox with a module's default export instead (a `SeedModule` from `stack.ts`); `scripts/readme-images/seed.ts`, the README's made-up projects, is one. Its rows differ from this table, and `state` lists only repos under its scan root.
+
 Assume nothing beyond this table, and only what `state` shows after you change things. Removals are real, so a check that removes rows starts from a fresh seed: `down --purge`, then `up` (half a second). To arrange other state, use Git or `wt` as the instance's user, through a supported path, in the same shell call as the `eval` of `env` → `exports` (it reads `env --full`), as [features/rescan.md](features/rescan.md) does. Never edit `.git` files or the cache to fake the behavior under test.
 
 On Linux, backdating a worktree does not move its birth time, so the real binary sees `feature/login` and `docs/typos` as new (Review, "Created just now…"); `env` reports `backdatesOnDisk: false` and `env --full` → `seed` already expects that. This skill was only run on macOS.

@@ -39,6 +39,16 @@ Dependabot opens a weekly pull request that updates the GitHub Actions the workf
 
 Include the operating system and its version (the Linux distribution on Linux), CPU architecture, terminal application, `wt-dash --version`, and the output of `wt-dash --doctor` with your scan folders. Remove private paths and repository names first. For display issues, add the terminal size and the keys that triggered the problem.
 
+## README images
+
+The screenshots in `docs/images` show made-up projects, never your own. After a change to what the dashboard shows, rebuild them on macOS with tmux and [agent-browser](https://github.com/vercel-labs/agent-browser) installed:
+
+```sh
+bun run readme-images
+```
+
+It builds the projects in `scripts/readme-images/seed.ts` in a sandbox with its own home folder, opens wt-dash there in tmux with its clock pinned by `scripts/readme-images/clock.ts`, renders each screen with the `verify-wt-dash` skill's image command, and deletes the sandbox. The same source makes the same images, so `git diff` shows only screens that changed. Look at each image before committing it. To change what the images show, edit the seed or the keys `scripts/readme-images/index.ts` presses.
+
 ## Building from source
 
 `bun run build` writes `dist/wt-dash`, a standalone executable that bundles Bun and the terminal UI, plus an archive, its SHA-256 checksum, and third-party notices. Build on the operating system and architecture you want to ship, because the matching OpenTUI native library is embedded.
