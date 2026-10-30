@@ -5,6 +5,7 @@ import { parseArgs } from "../../src/cli";
 import { prepareStartup } from "../../src/startup";
 import { inSandbox, withApp, TEST_TIMEOUT } from "../support/app";
 import type { Sandbox } from "../support/fixture";
+import { savedReposFile } from "../../src/core/scan/saved";
 
 async function repoWithWorktree(sandbox: Sandbox, path: string, branch: string, worktree: string) {
   await mkdir(path, { recursive: true });
@@ -71,11 +72,20 @@ test(
       await mkdir(join(sandbox.home, "code"));
       await mkdir(join(sandbox.home, ".codex", "worktrees"), { recursive: true });
       const { sources } = await startup(sandbox);
-      await withApp(sandbox, { width: 120, sources, name: "empty first run" }, async (app) => {
-        const frame = await app.settled();
-        expect(frame).toContain("No worktrees found in ~/code and ~/.codex/worktrees.");
-        expect(frame).toContain("Scan other folders with: wt-dash <folder>");
-      });
+      const savedRepos = { file: savedReposFile(sandbox.home, sandbox.env), listed: true };
+      await withApp(
+        sandbox,
+        { width: 120, sources, savedRepos, name: "empty first run" },
+        async (app) => {
+          const frame = await app.settled();
+          expect(frame).toContain("No worktrees found in ~/code and ~/.codex/worktrees.");
+          expect(frame).toContain("Scan other folders with: wt-dash <folder>");
+          expect(frame).toContain(
+            "wt-dash remembers the repositories it finds, and lists them in every run without folders.",
+          );
+          expect(frame).toContain("To forget them, delete ~/.local/state/wt-dash/repos.json");
+        },
+      );
     }),
   TEST_TIMEOUT,
 );
@@ -103,6 +113,8 @@ test(
           "Agent worktree folders:",
           `  ${home}/.t3/worktrees  1 repository`,
           `  ${home}/.codex/worktrees  1 repository`,
+          "Saved repositories:",
+          `  ${home}/.local/state/wt-dash/repos.json  0 repositories`,
           "Repositories found: 2",
           "Search depth: 2",
           "Setup checks passed.",

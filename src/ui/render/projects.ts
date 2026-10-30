@@ -189,14 +189,24 @@ export function scanProgress(state: UiState, ctx: RenderContext): Line[] {
   return lines;
 }
 
-function emptyScan({ scanned, home, width }: RenderContext): Line[] {
+function emptyScan({ scanned, savedFile, home, width }: RenderContext): Line[] {
   const folders = scanned.map((folder) => homePath(folder, home));
   const found = folders.length
     ? `No worktrees found in ${folders.length > 1 ? `${folders.slice(0, -1).join(", ")} and ` : ""}${folders.at(-1)}.`
     : "No worktrees found, and no folder to scan exists.";
-  return [...wrap(found, width - 4), "Scan other folders with: wt-dash <folder>"].map((text) => [
-    dim(`  ${text}`),
-  ]);
+  return [
+    ...wrap(found, width - 4),
+    "Scan other folders with: wt-dash <folder>",
+    ...(savedFile
+      ? [
+          ...wrap(
+            "wt-dash remembers the repositories it finds, and lists them in every run without folders.",
+            width - 4,
+          ),
+          ...wrap(`To forget them, delete ${homePath(savedFile, home)}`, width - 4),
+        ]
+      : []),
+  ].map((text) => [dim(`  ${text}`)]);
 }
 
 function projectsBody(

@@ -10,6 +10,7 @@ export interface RenderContext {
   theme: Theme;
   home: string;
   scanned: string[];
+  savedFile?: string;
   canAct: boolean;
 }
 

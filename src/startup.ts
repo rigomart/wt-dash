@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DEFAULT_SCAN_FOLDERS, type CliOptions } from "./cli";
 import { runCommand } from "./core/process";
 import { findRepos, type RepoSource } from "./core/scan/discovery";
+import { readSavedRepos } from "./core/scan/saved";
 import { AGENT_FOLDERS } from "./core/worktrunk/list";
 
 const minimumWorktrunk = [0, 80, 0];
@@ -124,19 +125,24 @@ export async function prepareStartup(
 
 const repositories = (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`;
 
-/** The doctor's lines: the repositories each source finds, then the distinct total. */
+/**
+ * The doctor's lines: the repositories each source finds, then the distinct total. Without folders, the repositories
+ * saved in `savedFile` are a source too.
+ */
 export async function doctorSources(
   sources: RepoSource[],
   options: Pick<CliOptions, "defaults" | "depth">,
+  savedFile?: string,
 ): Promise<string> {
   const found = await findRepos(sources, options.depth);
+  const saved = options.defaults && savedFile ? await readSavedRepos(savedFile) : null;
   const section = (kind: RepoSource["kind"], title: string, none: string) => {
     const lines = found
       .filter(({ source }) => source.kind === kind)
       .map(({ source, repos }) => `  ${source.folder}  ${repositories(repos.length)}`);
     return lines.length ? `${title}:\n${lines.join("\n")}` : `${title}: ${none}`;
   };
-  const all = new Set(found.flatMap(({ repos }) => repos));
+  const all = new Set([...found.flatMap(({ repos }) => repos), ...(saved ?? [])]);
   return [
     section(
       "scan",
@@ -146,6 +152,7 @@ export async function doctorSources(
     ...(options.defaults
       ? [section("agent", "Agent worktree folders", "none of the known ones exists")]
       : []),
+    ...(saved ? [`Saved repositories:\n  ${savedFile}  ${repositories(saved.length)}`] : []),
     `Repositories found: ${all.size}`,
   ].join("\n");
 }

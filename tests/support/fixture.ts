@@ -52,6 +52,8 @@ export interface ExecOptions {
   env?: Record<string, string>;
 }
 
+export type SavedRepos = NonNullable<Parameters<typeof createServices>[0]["savedRepos"]>;
+
 export interface Services {
   dashboard: DashboardService;
   actions: ActionService;
@@ -136,7 +138,11 @@ export interface Sandbox {
    * Dashboard, action and size services on the sandbox; `cleanup` closes any still open. `runner` replaces the
    * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root.
    */
-  services(options?: { runner?: CommandRunner; sources?: RepoSource[] }): Promise<Services>;
+  services(options?: {
+    runner?: CommandRunner;
+    sources?: RepoSource[];
+    savedRepos?: SavedRepos;
+  }): Promise<Services>;
   /** Closes services, removes every worktree of the sandbox's repos, then the sandbox. Safe to call twice. */
   cleanup(): Promise<void>;
 }
@@ -591,7 +597,7 @@ export async function createSandbox(
   }
 
   async function services(
-    options: { runner?: CommandRunner; sources?: RepoSource[] } = {},
+    options: { runner?: CommandRunner; sources?: RepoSource[]; savedRepos?: SavedRepos } = {},
   ): Promise<Services> {
     const app = await createServices({
       home,
@@ -600,6 +606,7 @@ export async function createSandbox(
       wtPath,
       runner: options.runner ?? runner,
       readCreated,
+      savedRepos: options.savedRepos,
     });
     const service: Services = {
       ...app,

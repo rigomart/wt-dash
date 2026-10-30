@@ -1,5 +1,20 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+
+const holdsGitFolder = (entries: Dirent[]) =>
+  entries.some((entry) => entry.name === ".git" && entry.isDirectory());
+
+/** Whether `folder` is a repository by the scan's test, or null when it can't be read, so it may still be one. */
+export async function isRepo(folder: string): Promise<boolean | null> {
+  try {
+    return holdsGitFolder(await readdir(folder, { withFileTypes: true }));
+  } catch (error) {
+    return ["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")
+      ? false
+      : null;
+  }
+}
 
 export async function discoverRepos(root: string, maxDepth: number): Promise<string[]> {
   const repos: string[] = [];
@@ -21,10 +36,7 @@ export async function discoverRepos(root: string, maxDepth: number): Promise<str
         throw error;
       },
     );
-    if (
-      depth + 1 <= maxDepth &&
-      entries.some((entry) => entry.name === ".git" && entry.isDirectory())
-    ) {
+    if (depth + 1 <= maxDepth && holdsGitFolder(entries)) {
       repos.push(directory);
       return;
     }

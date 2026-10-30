@@ -5,6 +5,7 @@ import { createDashboardService } from "./core/scan/dashboard";
 import { findRepos, type RepoSource } from "./core/scan/discovery";
 import { findProcesses } from "./core/processes";
 import { findOrphans } from "./core/scan/orphans";
+import { rememberRepos } from "./core/scan/saved";
 import { createSizeService } from "./core/sizes";
 import type { CommandRunner, DashboardService, SizeService } from "./core/types";
 
@@ -23,8 +24,10 @@ export async function createServices(options: {
   wtPath: string;
   runner: CommandRunner;
   readCreated?: (worktree: string) => Promise<string | null>;
+  /** Saves each scan's repositories to `file`, and with `listed` (a run without folders) lists the saved ones too. */
+  savedRepos?: { file: string; listed: boolean };
 }): Promise<Services> {
-  const { home, sources, depth, wtPath, runner, readCreated } = options;
+  const { home, sources, depth, wtPath, runner, readCreated, savedRepos } = options;
   const cache = join(home, ".cache/wt-dash");
   const sizes = createSizeService(join(cache, "sizes.json"), runner);
   await sizes.load();
@@ -33,8 +36,14 @@ export async function createServices(options: {
     wtPath,
     runner,
     sizeService: sizes,
-    discover: async () =>
-      [...new Set((await findRepos(sources, depth)).flatMap(({ repos }) => repos))].sort(),
+    discover: async () => {
+      const found = [
+        ...new Set((await findRepos(sources, depth)).flatMap(({ repos }) => repos)),
+      ].sort();
+      if (!savedRepos) return found;
+      const saved = await rememberRepos(savedRepos.file, found);
+      return savedRepos.listed ? saved : found;
+    },
     readCreated,
     findOrphans: (repos) => findOrphans(home, repos),
     findProcesses: (paths, signal) => findProcesses(paths, runner, { signal }),

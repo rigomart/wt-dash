@@ -7,7 +7,7 @@ import type { RepoSource } from "../../src/core/scan/discovery";
 import type { CommandRunner } from "../../src/core/types";
 import { runTerminal } from "../../src/ui/terminal";
 import { sizeLabel } from "../../src/ui/format";
-import { createSandbox, type Built, type Sandbox, type Services } from "./fixture";
+import { createSandbox, type Built, type SavedRepos, type Sandbox, type Services } from "./fixture";
 
 /** Keys `press` sends by name; anything else is sent as typed text, so "D" is a shifted d. */
 const NAMED = ["escape", "enter", "tab", "space", "backspace", "up", "down", "left", "right"];
@@ -66,15 +66,23 @@ export async function startApp(
     height = 40,
     runner,
     sources,
-  }: { width: number; height?: number; runner?: CommandRunner; sources?: RepoSource[] },
+    savedRepos,
+  }: {
+    width: number;
+    height?: number;
+    runner?: CommandRunner;
+    sources?: RepoSource[];
+    savedRepos?: SavedRepos;
+  },
 ): Promise<App> {
-  const services = await sandbox.services({ runner, sources });
+  const services = await sandbox.services({ runner, sources, savedRepos });
   const setup = await createTestRenderer({ width, height });
   const running = runTerminal(services.dashboard, {
     renderer: setup.renderer,
     actions: services.actions,
     home: sandbox.home,
     scanned: (sources ?? [{ folder: sandbox.scanRoot }]).map(({ folder }) => folder),
+    savedFile: savedRepos?.file,
   });
   const frames: string[] = [];
   let closed = false;
@@ -192,6 +200,7 @@ export async function withApp(
     height?: number;
     runner?: CommandRunner;
     sources?: RepoSource[];
+    savedRepos?: SavedRepos;
     name: string;
   },
   body: (app: App) => Promise<void>,

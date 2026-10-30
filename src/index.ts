@@ -4,6 +4,7 @@ import { help, parseArgs, version } from "./cli";
 import { doctorSources, platformName, prepareStartup } from "./startup";
 import { createServices } from "./app";
 import { runCommand } from "./core/process";
+import { savedReposFile } from "./core/scan/saved";
 
 async function main(): Promise<void> {
   const home = homedir();
@@ -17,9 +18,10 @@ async function main(): Promise<void> {
     return;
   }
   const ready = await prepareStartup(options, { home });
+  const savedFile = savedReposFile(home);
   if (options.mode === "doctor") {
     console.log(
-      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\n${await doctorSources(ready.sources, options)}\nSearch depth: ${options.depth}\nSetup checks passed.`,
+      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\n${await doctorSources(ready.sources, options, savedFile)}\nSearch depth: ${options.depth}\nSetup checks passed.`,
     );
     return;
   }
@@ -34,12 +36,14 @@ async function main(): Promise<void> {
     depth: options.depth,
     wtPath: ready.wtPath,
     runner: runCommand,
+    savedRepos: { file: savedFile, listed: options.defaults },
   });
   try {
     await runTerminal(dashboard, {
       actions,
       home,
       scanned: ready.sources.map(({ folder }) => folder),
+      savedFile,
     });
   } finally {
     await close();

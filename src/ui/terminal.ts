@@ -27,6 +27,8 @@ export async function runTerminal(
     home?: string;
     /** The folders the scan searched, named when it finds nothing. */
     scanned?: string[];
+    /** The file that keeps the repositories found, named when the scan finds nothing. */
+    savedFile?: string;
   } = {},
 ): Promise<void> {
   const renderer = options.renderer ?? (await createCliRenderer({ exitOnCtrlC: false }));
@@ -64,6 +66,7 @@ export async function runTerminal(
       theme,
       home,
       scanned: options.scanned ?? [],
+      savedFile: options.savedFile,
       canAct: actions !== undefined,
     };
   }

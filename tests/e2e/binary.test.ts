@@ -9,6 +9,7 @@ import {
   sectionOf,
   TEST_TIMEOUT,
 } from "../support/app";
+import type { Sandbox } from "../support/fixture";
 
 const [WIDTH, HEIGHT] = [100, 30];
 const ENTRY = join(import.meta.dir, "../../src/index.ts");
@@ -82,6 +83,71 @@ function terminal(width: number, height: number) {
   };
 }
 
+function launch(sandbox: Sandbox, args: string[]) {
+  const app = Bun.spawn(
+    ["python3", "-I", "-c", RELAY, `${WIDTH}`, `${HEIGHT}`, process.execPath, ENTRY, ...args],
+    {
+      cwd: sandbox.root,
+      env: { ...sandbox.env, TERM: "xterm-256color" },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  );
+  const screen = terminal(WIDTH, HEIGHT);
+  const waiters = new Set<() => void>();
+  const reading = (async () => {
+    for await (const chunk of app.stdout) {
+      screen.write(chunk);
+      for (const check of waiters) check();
+    }
+  })();
+  let exited = false;
+  void app.exited.then(() => {
+    exited = true;
+    for (const check of waiters) check();
+  });
+
+  function waitFor(match: (text: string) => boolean, what: string, timeout = 10_000) {
+    return new Promise<string>((resolve, reject) => {
+      const fail = (why: string) => {
+        done();
+        reject(new Error(`${why} waiting for ${what}. Screen:\n${screen.text()}`));
+      };
+      const check = () => {
+        if (match(screen.text())) {
+          done();
+          resolve(screen.text());
+        } else if (exited) fail(`The app exited with ${app.exitCode}`);
+      };
+      const timer = setTimeout(() => fail(`Timed out after ${timeout} ms`), timeout);
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(check);
+      };
+      waiters.add(check);
+      check();
+    });
+  }
+  return {
+    waitFor,
+    press(key: string) {
+      app.stdin.write(key);
+      app.stdin.flush();
+    },
+    exited: app.exited,
+    async close() {
+      if (!exited) {
+        app.stdin.end();
+        const timer = setTimeout(() => app.kill("SIGKILL"), 5000);
+        await app.exited;
+        clearTimeout(timer);
+      }
+      await reading;
+    },
+  };
+}
+
 test(
   "the binary's own wiring removes a Safe worktree with --reap, keeps the Review one, and quits with 0",
   () =>
@@ -89,66 +155,7 @@ test(
       const repo = await sandbox.repo("alpha");
       const squashed = await repo.squashMergedWorktree("squashed");
       const fresh = await repo.freshWorktree("fresh");
-      const app = Bun.spawn(
-        [
-          "python3",
-          "-I",
-          "-c",
-          RELAY,
-          `${WIDTH}`,
-          `${HEIGHT}`,
-          process.execPath,
-          ENTRY,
-          sandbox.scanRoot,
-        ],
-        {
-          cwd: sandbox.root,
-          env: { ...sandbox.env, TERM: "xterm-256color" },
-          stdin: "pipe",
-          stdout: "pipe",
-          stderr: "inherit",
-        },
-      );
-      const screen = terminal(WIDTH, HEIGHT);
-      const waiters = new Set<() => void>();
-      const reading = (async () => {
-        for await (const chunk of app.stdout) {
-          screen.write(chunk);
-          for (const check of waiters) check();
-        }
-      })();
-      let exited = false;
-      void app.exited.then(() => {
-        exited = true;
-        for (const check of waiters) check();
-      });
-
-      function waitFor(match: (text: string) => boolean, what: string, timeout = 10_000) {
-        return new Promise<string>((resolve, reject) => {
-          const fail = (why: string) => {
-            done();
-            reject(new Error(`${why} waiting for ${what}. Screen:\n${screen.text()}`));
-          };
-          const check = () => {
-            if (match(screen.text())) {
-              done();
-              resolve(screen.text());
-            } else if (exited) fail(`The app exited with ${app.exitCode}`);
-          };
-          const timer = setTimeout(() => fail(`Timed out after ${timeout} ms`), timeout);
-          const done = () => {
-            clearTimeout(timer);
-            waiters.delete(check);
-          };
-          waiters.add(check);
-          check();
-        });
-      }
-      const press = (key: string) => {
-        app.stdin.write(key);
-        app.stdin.flush();
-      };
-
+      const { waitFor, press, exited, close } = launch(sandbox, [sandbox.scanRoot]);
       try {
         let text = await waitFor(
           (shown) => shown.includes("scanned ") && shown.includes("? REVIEW  1 worktree"),
@@ -185,16 +192,62 @@ test(
         expect(await exists(join(sandbox.home, ".cache", "wt-dash", "sizes.json"))).toBe(true);
 
         press("q");
-        expect(await app.exited).toBe(0);
+        expect(await exited).toBe(0);
       } finally {
-        if (!exited) {
-          app.stdin.end();
-          const timer = setTimeout(() => app.kill("SIGKILL"), 5000);
-          await app.exited;
-          clearTimeout(timer);
-        }
-        await reading;
+        await close();
       }
+    }),
+  TEST_TIMEOUT,
+);
+
+test(
+  "a repository found by a run with a folder is listed by a later run without one, and by --doctor (#50)",
+  () =>
+    inSandbox(async (sandbox) => {
+      const repo = await sandbox.repo("alpha");
+      await repo.freshWorktree("fresh");
+      const scanned = (shown: string) =>
+        shown.includes("scanned ") && (shown.includes("fresh") || shown.includes("No worktrees"));
+
+      const first = launch(sandbox, [sandbox.scanRoot]);
+      try {
+        expect(rowOf(await first.waitFor(scanned, "the scan"), "fresh")).toStartWith("□ fresh ");
+        first.press("q");
+        expect(await first.exited).toBe(0);
+      } finally {
+        await first.close();
+      }
+
+      const plain = launch(sandbox, []);
+      try {
+        const text = await plain.waitFor(scanned, "the scan");
+        expect(text).toContain("wt-dash › alpha");
+        expect(rowOf(text, "fresh")).toStartWith("□ fresh ");
+        plain.press("q");
+        expect(await plain.exited).toBe(0);
+      } finally {
+        await plain.close();
+      }
+
+      const doctor = Bun.spawn([process.execPath, ENTRY, "--doctor"], {
+        cwd: sandbox.root,
+        env: sandbox.env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(doctor.stdout).text(),
+        new Response(doctor.stderr).text(),
+        doctor.exited,
+      ]);
+      expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+      expect(stdout).toContain(
+        [
+          "Saved repositories:",
+          `  ${join(sandbox.home, ".local", "state", "wt-dash", "repos.json")}  1 repository`,
+          "Repositories found: 1",
+        ].join("\n"),
+      );
     }),
   TEST_TIMEOUT,
 );
