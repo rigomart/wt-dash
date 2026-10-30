@@ -30,6 +30,13 @@ function names(entries: RemovalEntry[]): string {
     : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
 }
 
+function ignoredNote(entries: RemovalEntry[]): string {
+  if (entries.length > 1) return `! Deletes ignored files in ${names(entries)}`;
+  const files = entries[0]!.ignoredFiles;
+  const more = files.length > 2 ? ` +${files.length - 2} more` : "";
+  return `! Deletes ignored files in ${names(entries)}: ${files.slice(0, 2).join(", ")}${more}`;
+}
+
 export function withConfirm(
   base: Line[],
   state: UiState,
@@ -111,6 +118,8 @@ function removeDialog(
       ),
     );
   if (dirty.length) notes.push(...warn(`! Discards uncommitted changes in ${names(dirty)}`));
+  const withIgnored = ready.filter((entry) => entry.ignoredFiles.length);
+  if (withIgnored.length) notes.push(...warn(ignoredNote(withIgnored)));
   if (blocked.length) {
     notes.push(
       ...warn(

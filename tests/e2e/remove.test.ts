@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { sizeLabel } from "../../src/ui/format";
 import {
+  dialog,
   dialogRow,
   exists,
   inSandbox,
@@ -173,6 +176,69 @@ for (const width of WIDTHS) {
               branchOutcome,
             })),
           ).toEqual([{ branch: "open", path: null, flags: ["-D"], branchOutcome: "deleted" }]);
+        });
+      }),
+    TEST_TIMEOUT,
+  );
+}
+
+for (const width of WIDTHS) {
+  test(
+    `at ${width} columns: the dialog names ignored files that aren't caches, and says nothing of cache folders alone (#45)`,
+    () =>
+      inSandbox(async (sandbox) => {
+        const alpha = await sandbox.repo("alpha");
+        await appendFile(join(alpha.path, ".git", "info", "exclude"), ".env*\n*.db\n");
+        const secrets = await alpha.squashMergedWorktree("secrets");
+        for (const file of [".env.local", ".env.test", "dev.db"])
+          await writeFile(join(secrets.path!, file), "secret\n");
+        await mkdir(join(secrets.path!, "node_modules", "pkg"), { recursive: true });
+        await writeFile(join(secrets.path!, "node_modules", "pkg", "index.js"), "export {};\n");
+        const dotenv = await alpha.squashMergedWorktree("dotenv");
+        await writeFile(join(dotenv.path!, ".env.local"), "secret\n");
+        await alpha.sizedWorktree("caches", { kib: 64 });
+        await (await sandbox.repo("beta")).squashMergedWorktree("other");
+        await withApp(sandbox, { width, name: "ignored files" }, async (app) => {
+          await app.settled();
+          await open(app);
+          await app.focus("secrets");
+          await app.press("x");
+          let frame = await app.waitFor("╭─ Remove");
+          expect(squeeze(lineWith(dialog(frame), "! Deletes")).trim()).toBe(
+            "│ ! Deletes ignored files in secrets: .env.local, .env.test +1 more │",
+          );
+          expect(dialog(frame)).not.toContain("node_modules");
+          expect(dialog(frame)).toContain(
+            "Nothing uncommitted. Ignored files and caches go with them.",
+          );
+
+          await app.press("escape");
+          await app.waitFor((text) => !text.includes("╭─"));
+          await app.focus("caches");
+          await app.press("x");
+          frame = await app.waitFor("╭─ Remove");
+          expect(dialogRow(frame, "caches")).not.toBe("");
+          expect(dialog(frame)).not.toContain("Deletes ignored files");
+          expect(dialog(frame)).toContain(
+            "Nothing uncommitted. Ignored files and caches go with them.",
+          );
+
+          await app.press("escape");
+          await app.waitFor((text) => !text.includes("╭─"));
+          await app.focus("secrets");
+          await app.press("space");
+          await app.waitFor((text) => rowOf(text, "secrets")?.startsWith("■ ") ?? false);
+          for (const branch of ["caches", "dotenv"]) {
+            await app.focus(branch);
+            await app.press("space");
+            await app.waitFor((text) => rowOf(text, branch)?.startsWith("■ ") ?? false);
+          }
+          await app.press("x");
+          frame = await app.waitFor("╭─ Remove 3 worktrees");
+          expect(squeeze(lineWith(dialog(frame), "! Deletes")).trim()).toBe(
+            "│ ! Deletes ignored files in dotenv and secrets │",
+          );
+          expect(await exists(secrets.path!)).toBe(true);
         });
       }),
     TEST_TIMEOUT,
