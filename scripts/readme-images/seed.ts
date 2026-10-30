@@ -651,6 +651,9 @@ const seed: SeedModule = async (sandbox) => {
     },
   );
   await rm(dirname(offline), { recursive: true });
+  // The newest worktree starts from this commit, so its age column agrees with "Created 2h ago". It is empty so
+  // main's files stay the same and t3/dark-mode-tokens still matches main exactly.
+  await git(mobile.path, at("2h"), "commit", "-q", "--allow-empty", "-m", "Release 1.4.2");
   await mobile.worktree(
     {
       branch: "claude/push-settings",
