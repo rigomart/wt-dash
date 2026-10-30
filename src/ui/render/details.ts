@@ -1,7 +1,7 @@
 import { assess, markerNote, removalBlockReason } from "../../core/assess";
-import type { WorktreeRow } from "../../core/types";
+import type { RunningProcess, WorktreeRow } from "../../core/types";
 import { TOOL_NAMES } from "../../core/worktrunk/list";
-import { isSizing } from "../../core/view";
+import { isSizing, processesOf } from "../../core/view";
 import {
   aheadLabel,
   agoLabel,
@@ -11,8 +11,11 @@ import {
   divergenceLabel,
   homePath,
   homeText,
+  INTERACTIVE_LABEL,
   plain,
   porcelainPath,
+  portsLabel,
+  processesLabel,
   sizeLabel,
   statusLabel,
   upstreamLabel,
@@ -102,6 +105,8 @@ export function worktreeSummary(
   // Above the files, so a strip too short for everything cuts an ignored-files line rather than the mark.
   const mark = markerNote(row, now);
   if (mark) lines.push([dim(clip(mark, width))]);
+  const running = processesOf(ctx.snapshot, row);
+  if (running.length) lines.push([seg(clip(processesLabel(running), width))]);
   if (ctx.canAct && row.kind === "worktree")
     lines.push(...pad(summaryFiles(row, state, ctx, width), SUMMARY_FILE_LINES));
   return lines;
@@ -294,6 +299,11 @@ export function detailLines(
   ];
   const mark = markerNote(row, now);
   if (mark) lines.push(...field("MARK", mark, width));
+  processesOf(ctx.snapshot, row).forEach((running, index) =>
+    lines.push(
+      ...field(index ? "" : "PROCESSES", processText(running, width - LABEL_WIDTH), width),
+    ),
+  );
   if (ctx.canAct && row.kind === "worktree")
     lines.push([], ...filesSection(row, state, ctx, width));
   lines.push([]);
@@ -303,6 +313,14 @@ export function detailLines(
   else if (status) lines.push(...field("REMOVAL", status.label, width, status.style), []);
   lines.push(...actionLines(row, state, ctx, width, canExpand));
   return lines;
+}
+
+function processText(running: RunningProcess, width: number): string {
+  const suffix = [
+    running.interactive ? ` ${INTERACTIVE_LABEL}` : "",
+    running.ports.length ? `  ${portsLabel(running.ports)}` : "",
+  ].join("");
+  return clip(running.command, Math.max(8, width - textWidth(suffix))) + suffix;
 }
 
 function sizeText(row: WorktreeRow, ctx: RenderContext): string {

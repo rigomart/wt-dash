@@ -1,6 +1,7 @@
 import {
   ORPHANS,
   type DashboardSnapshot,
+  type RunningProcess,
   type ToolName,
   type Verdict,
   type WorktreeRow,
@@ -94,6 +95,13 @@ export function selectRows(rows: WorktreeRow[], options: ViewOptions): WorktreeR
 /** A worktree with no size yet whose folder is being measured; one whose measurement failed is not. */
 export function isSizing(snapshot: Pick<DashboardSnapshot, "sizing">, row: WorktreeRow): boolean {
   return row.sizeKiB === null && row.path !== null && snapshot.sizing.includes(row.path);
+}
+
+export function processesOf(
+  snapshot: Pick<DashboardSnapshot, "processes">,
+  row: WorktreeRow,
+): RunningProcess[] {
+  return (row.path !== null && snapshot.processes[row.path]) || [];
 }
 
 /** Groups rows by repo in the order they come, orphans last. */

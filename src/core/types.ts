@@ -131,6 +131,17 @@ export interface SizeService {
   close(): Promise<void>;
 }
 
+/** A process whose working directory is inside a worktree. */
+export interface RunningProcess {
+  pid: number;
+  /** Its command line, with the program's folder left off. */
+  command: string;
+  /** It holds a controlling terminal, as an interactive shell or a terminal editor does; Worktrunk's reap leaves it running. */
+  interactive: boolean;
+  /** TCP ports it listens on, lowest first. */
+  ports: number[];
+}
+
 /** A discovered repository, known before Worktrunk lists it. */
 export interface RepoInfo {
   path: string;
@@ -153,6 +164,8 @@ export interface DashboardSnapshot {
   fatalError: string | null;
   /** Worktree folders whose size is being measured right now. */
   sizing: string[];
+  /** Processes running inside each row's folder, keyed by the folder, as of the last completed scan. */
+  processes: Record<string, RunningProcess[]>;
 }
 
 export interface DashboardService {
