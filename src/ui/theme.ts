@@ -10,11 +10,14 @@ export interface Theme {
   accent: RGBA;
   focusBg: RGBA;
   toastBg: RGBA;
+  confirmBg: RGBA;
+  confirmFg: RGBA;
 }
 
 /**
  * Semantic colors use the terminal's own ANSI palette, so they follow the user's theme.
- * Only the focus bar is a fixed tint, picked for the terminal's light or dark mode.
+ * The tints and the dialogs' red confirm button are fixed, picked for the terminal's light or dark mode,
+ * since text on the palette's own red can't be kept readable.
  */
 export function createTheme(mode: "dark" | "light" | null): Theme {
   const light = mode === "light";
@@ -27,6 +30,8 @@ export function createTheme(mode: "dark" | "light" | null): Theme {
     accent: RGBA.fromIndex(6),
     focusBg: RGBA.fromHex(light ? "#dfe3ea" : "#2b303b"),
     toastBg: RGBA.fromHex(light ? "#f3ead2" : "#3a3222"),
+    confirmBg: RGBA.fromHex(light ? "#c62828" : "#e5534b"),
+    confirmFg: RGBA.fromHex(light ? "#ffffff" : "#000000"),
   };
 }
 

@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { KeyEvent } from "@opentui/core";
+import type { CapturedSpan, KeyEvent } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { RepoSource } from "../../src/core/scan/discovery";
 import type { CommandRunner } from "../../src/core/types";
@@ -28,6 +28,10 @@ export interface App {
   press(key: string): Promise<void>;
   type(text: string): Promise<void>;
   frame(): Promise<string>;
+  /** Renders a frame and returns the first span whose text contains `text`, with its colors and attributes. */
+  span(text: string): Promise<CapturedSpan | undefined>;
+  /** Switches to a dark or light terminal theme as a terminal does: announces the change, then answers the color query. */
+  switchTheme(mode: "dark" | "light"): void;
   /** Renders until the frame matches, and returns that frame; throws with the last frame on timeout. */
   waitFor(match: FrameMatch, options?: { timeout?: number }): Promise<string>;
   /**
@@ -174,6 +178,22 @@ export async function startApp(
       for (const char of text) await press(char === " " ? "space" : char);
     },
     frame,
+    async span(text) {
+      await frame();
+      return setup
+        .captureSpans()
+        .lines.flatMap(({ spans }) => spans)
+        .find((span) => span.text.includes(text));
+    },
+    switchTheme(mode) {
+      const [fg, bg] = mode === "light" ? ["0000", "ffff"] : ["ffff", "0000"];
+      const stdin = setup.renderer.stdin;
+      stdin.emit("data", Buffer.from(`\x1b[?997;${mode === "light" ? 2 : 1}n`));
+      stdin.emit(
+        "data",
+        Buffer.from(`\x1b]10;rgb:${fg}/${fg}/${fg}\x1b\\\x1b]11;rgb:${bg}/${bg}/${bg}\x1b\\`),
+      );
+    },
     waitFor,
     frames,
     async close() {

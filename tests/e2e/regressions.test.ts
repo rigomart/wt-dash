@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import { chmod, mkdir, rm, stat, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { TextAttributes } from "@opentui/core";
 import { sizeLabel } from "../../src/ui/format";
+import { createTheme } from "../../src/ui/theme";
 import {
   dialog,
   dialogRow,
@@ -402,3 +404,46 @@ for (const width of [120, 80]) {
     TEST_TIMEOUT,
   );
 }
+
+test(
+  "#61: the remove and prune dialogs' confirm button is contrasting text on a red block, never reverse video, in dark and light terminals",
+  () =>
+    inSandbox(async (sandbox) => {
+      const repo = await sandbox.repo("alpha");
+      await repo.mergedWorktree("done");
+      await repo.deletedWorktree("gone");
+      await withApp(sandbox, { width: 120, name: "B58" }, async (app) => {
+        const button = async (label: string) => {
+          const span = await app.span(label);
+          return (
+            span && {
+              fg: span.fg.toInts(),
+              bg: span.bg.toInts(),
+              reverse: span.attributes & TextAttributes.INVERSE,
+            }
+          );
+        };
+        const colors = (mode: "dark" | "light") => {
+          const theme = createTheme(mode);
+          return { fg: theme.confirmFg.toInts(), bg: theme.confirmBg.toInts(), reverse: 0 };
+        };
+        await app.settled();
+        await app.focus("done");
+        await app.press("x");
+        await app.waitFor("╭─ Remove");
+        expect(await button("Remove 1  y / enter")).toEqual(colors("dark"));
+        app.switchTheme("light");
+        expect(await button("Remove 1  y / enter")).toEqual(colors("light"));
+        app.switchTheme("dark");
+        expect(await button("Remove 1  y / enter")).toEqual(colors("dark"));
+        await app.press("escape");
+        await app.waitFor((text) => !text.includes("╭─"));
+        await app.focus("gone");
+        await app.press("enter");
+        await app.waitFor("╭─ Prune");
+        app.switchTheme("light");
+        expect(await button("Prune  y / enter")).toEqual(colors("light"));
+      });
+    }),
+  TEST_TIMEOUT,
+);

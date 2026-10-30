@@ -57,7 +57,7 @@ export function withConfirm(
 
 function buttons(theme: Theme, verb: string): Line {
   return [
-    seg(` ${verb}  y / enter `, { fg: theme.broken, reverse: true, bold: true }),
+    seg(` ${verb}  y / enter `, { fg: theme.confirmFg, bg: theme.confirmBg, bold: true }),
     seg("   "),
     seg("[ "),
     seg("Cancel  esc", { bold: true }),
