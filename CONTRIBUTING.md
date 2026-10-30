@@ -52,13 +52,67 @@ Versions and the changelog come from the commit messages on `main`, through [rel
 1. release-please keeps a Release PR open against `main`. It sets the next version in `package.json` and `.release-please-manifest.json` and adds the unreleased changes to `CHANGELOG.md`. Edit the changelog in that pull request if needed.
 2. Merge the Release PR to ship. The Release workflow tags the merge commit, creates a draft GitHub release with the changelog, runs every CI check, and attaches the four archives, their checksums, and a generated Homebrew formula, `wt-dash.rb`.
 3. Download and try the archives from the draft, then publish it. Homebrew cannot download the archives until it is published.
-4. Copy the release's `wt-dash.rb` into `Formula/` in [rigomart/homebrew-tap](https://github.com/rigomart/homebrew-tap), then run `brew install rigomart/tap/wt-dash` and `brew test rigomart/tap/wt-dash`.
+4. Publishing runs the Homebrew tap workflow, `.github/workflows/homebrew-tap.yml`, which commits the release's `wt-dash.rb` to `Formula/wt-dash.rb` in [rigomart/homebrew-tap](https://github.com/rigomart/homebrew-tap) as `wt-dash <version>`. It needs the deploy key described under [Homebrew tap deploy key](#homebrew-tap-deploy-key). When it finishes, run `brew update`, `brew install rigomart/tap/wt-dash` and `brew test rigomart/tap/wt-dash`.
+
+A draft release never touches the tap. Re-running the workflow for a release the tap already has, or for an older release, makes no commit. If it failed, for example because the deploy key was missing, fix the cause and re-run the failed job from the release's run in the Actions tab.
 
 The Release PR is opened by GitHub Actions, so CI does not run on it. It only changes the version and changelog of code that already passed CI on `main`, and the checks run again after it is merged. If a check fails on a release, re-run the failed jobs. If the release needs a code fix, delete the draft without publishing it and ship the fix in the next Release PR.
 
 GitHub Actions needs permission to open the Release PR: enable **Allow GitHub Actions to create and approve pull requests** under the repository's Settings → Actions → General.
 
 To generate the formula locally, put the macOS and Linux archives for both architectures in `dist/` and run `bun run formula rigomart/wt-dash`.
+
+## Homebrew tap deploy key
+
+A workflow's built-in token can only write to its own repository, so the Homebrew tap workflow pushes to `rigomart/homebrew-tap` with a deploy key: an SSH key added to the tap with write access, whose private half is stored in this repository as the Actions secret `HOMEBREW_TAP_DEPLOY_KEY`. A deploy key works on that one repository only, belongs to no personal account, and doesn't expire. Without the secret, the workflow fails with an error that names it.
+
+You need admin access to both repositories and the GitHub CLI signed in (`gh auth status`).
+
+### Create and install the key
+
+1. In a new empty folder, outside any repository, create a key pair without a passphrase. This writes the private half to `homebrew-tap-deploy-key` and the public half to `homebrew-tap-deploy-key.pub`.
+
+   ```sh
+   ssh-keygen -t ed25519 -N "" -C "wt-dash release workflow" -f homebrew-tap-deploy-key
+   ```
+
+2. Add the public half to the tap as a deploy key with write access:
+
+   ```sh
+   gh repo deploy-key add homebrew-tap-deploy-key.pub --repo rigomart/homebrew-tap --allow-write --title "wt-dash release workflow"
+   ```
+
+3. Store the private half as the secret in this repository:
+
+   ```sh
+   gh secret set HOMEBREW_TAP_DEPLOY_KEY --repo rigomart/wt-dash < homebrew-tap-deploy-key
+   ```
+
+4. Delete both files. GitHub keeps the only copies it needs, and the secret can't be read back.
+
+   ```sh
+   rm homebrew-tap-deploy-key homebrew-tap-deploy-key.pub
+   ```
+
+5. Check that both are in place: the key is listed with read-write access, and the secret is listed by name.
+
+   ```sh
+   gh repo deploy-key list --repo rigomart/homebrew-tap
+   gh secret list --repo rigomart/wt-dash
+   ```
+
+`gh repo deploy-key add` ties the key to your GitHub CLI sign-in: if you de-authorize the GitHub CLI app or its token, GitHub removes the key too, and the next publish fails. To avoid that, add the public half on the tap's Settings → Deploy keys page instead, with **Allow write access** checked.
+
+### Rotate the key
+
+Rotate it when someone who could read it leaves, or if the private half may have leaked. Run the five steps above with a new title such as `wt-dash release workflow 2`. `gh secret set` replaces the secret. Then remove the old key from the tap, using the ID that `gh repo deploy-key list` shows for the old title:
+
+```sh
+gh repo deploy-key list --repo rigomart/homebrew-tap
+gh repo deploy-key delete <old-key-id> --repo rigomart/homebrew-tap
+```
+
+If the key leaked, delete the old deploy key first, so it stops working at once, then create the new one.
 
 ## Rebuilding with a modified Bun runtime
 

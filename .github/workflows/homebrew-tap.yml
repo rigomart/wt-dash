@@ -1,0 +1,32 @@
+name: Homebrew tap
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the formula in rigomart/homebrew-tap
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download the release's formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release download "$RELEASE_TAG" --pattern wt-dash.rb --dir "$RUNNER_TEMP"
+      - name: Commit the formula to the tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: sh scripts/update-tap.sh "$RUNNER_TEMP/wt-dash.rb" "$RELEASE_TAG" git@github.com:rigomart/homebrew-tap.git
