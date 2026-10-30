@@ -2,11 +2,17 @@ import { join, resolve } from "node:path";
 import metadata from "../package.json";
 
 export const version = metadata.version;
+
+/** The folders in the home folder scanned when no folder is given, each only when it exists. */
+export const DEFAULT_SCAN_FOLDERS = ["projects", "code", "dev", "src", "work"];
+
 export const help = `wt-dash ${version} — inspect and clean up Git worktrees on macOS and Linux
 
 Usage: wt-dash [options] [folder ...]
 
-Scan ~/projects by default, or supply one or more repositories or parent folders.
+Without folders, scan ${DEFAULT_SCAN_FOLDERS.map((folder) => `~/${folder}`).join(", ")} where they exist,
+and the repositories of the worktrees in coding agents' worktree folders, such as ~/.codex/worktrees.
+Or supply one or more repositories or parent folders.
 
 Options:
   --depth <number>    Folder levels to search below each root (0–20; default: 2)
@@ -25,6 +31,8 @@ Examples:
 export interface CliOptions {
   mode: "run" | "help" | "version" | "doctor";
   roots: string[];
+  /** No folder was given: `roots` are the default folders, and agents' worktree folders are searched too. */
+  defaults: boolean;
   depth: number;
   wtPath?: string;
 }
@@ -35,7 +43,7 @@ export function expandPath(path: string, home: string, cwd: string): string {
 }
 
 export function parseArgs(args: string[], home: string, cwd: string): CliOptions {
-  const options: CliOptions = { mode: "run", roots: [], depth: 2 };
+  const options: CliOptions = { mode: "run", roots: [], defaults: false, depth: 2 };
   let positional = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
@@ -70,6 +78,9 @@ export function parseArgs(args: string[], home: string, cwd: string): CliOptions
       throw new Error(`Unknown option: ${arg}. Run wt-dash --help.`);
     options.roots.push(expandPath(arg, home, cwd));
   }
-  if (!options.roots.length) options.roots.push(join(home, "projects"));
+  if (!options.roots.length) {
+    options.defaults = true;
+    options.roots = DEFAULT_SCAN_FOLDERS.map((folder) => join(home, folder));
+  }
   return options;
 }

@@ -41,13 +41,20 @@ If your shell cannot find `wt-dash`, add `~/.local/bin` to your PATH.
 ## Usage
 
 ```sh
-wt-dash                  # scan ~/projects
-wt-dash ~/code ~/work    # scan other folders
+wt-dash                  # scan the usual code folders and agents' worktree folders
+wt-dash ~/code ~/work    # scan only these folders
 wt-dash . --depth 0      # just the current repository
 wt-dash --doctor         # check Git, Worktrunk, and folder access without opening the UI
 ```
 
 wt-dash looks for repositories up to two folder levels below each folder you give it (`--depth` changes this). Point it at main repositories or the folders that contain them. Worktrees stored elsewhere still show up, because Worktrunk lists every worktree linked to a repository wherever it lives.
+
+Without folders, wt-dash finds repositories in two ways:
+
+- It scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, each only if it exists, the same two levels deep.
+- It follows each worktree in the agents' folders in your home folder, such as `~/.codex/worktrees` and `~/.t3/worktrees` (every one is under [Which tool made a worktree](#which-tool-made-a-worktree)), back to its repository. A repository with an agent worktree shows up wherever it lives.
+
+If that finds nothing, wt-dash says which folders it scanned. `wt-dash --doctor` lists them with how many repositories each found.
 
 | Option                             | Effect                                                    |
 | ---------------------------------- | --------------------------------------------------------- |

@@ -1,5 +1,5 @@
-import { readdir, readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 export async function discoverRepos(root: string, maxDepth: number): Promise<string[]> {
   const repos: string[] = [];
@@ -37,6 +37,72 @@ export async function discoverRepos(root: string, maxDepth: number): Promise<str
 
   await visit(root, 0);
   return repos.sort();
+}
+
+/**
+ * Where repositories are found: a folder searched for them, or an agent's worktree folder, whose worktrees lead
+ * back to their repositories wherever those live.
+ */
+export type RepoSource =
+  | { kind: "scan"; folder: string }
+  | { kind: "agent"; folder: string; levels: readonly [number, number] };
+
+/** The repositories each source finds, searching scan folders `depth` levels below them. */
+export function findRepos(
+  sources: RepoSource[],
+  depth: number,
+): Promise<Array<{ source: RepoSource; repos: string[] }>> {
+  return Promise.all(
+    sources.map(async (source) => ({
+      source,
+      repos:
+        source.kind === "scan"
+          ? await discoverRepos(source.folder, depth + 1)
+          : await reposOfWorktrees(source.folder, source.levels),
+    })),
+  );
+}
+
+async function readGitdir(worktree: string): Promise<string | null> {
+  const link = await readFile(join(worktree, ".git"), "utf8");
+  const gitdir = /^gitdir: (.+)$/m.exec(link)?.[1]?.trim();
+  return gitdir ? resolve(worktree, gitdir) : null;
+}
+
+async function repoOfWorktree(worktree: string): Promise<string | null> {
+  try {
+    const gitdir = await readGitdir(worktree);
+    const records = gitdir && dirname(gitdir);
+    if (!records || basename(records) !== "worktrees" || basename(dirname(records)) !== ".git")
+      return null;
+    await stat(gitdir);
+    return await realpath(dirname(dirname(records)));
+  } catch {
+    return null;
+  }
+}
+
+/** The repositories of the worktrees between `fewest` and `most` folder levels below `folder`, read from their `.git` files, never through Git. */
+export async function reposOfWorktrees(
+  folder: string,
+  [fewest, most]: readonly [number, number],
+): Promise<string[]> {
+  const repos = new Set<string>();
+  async function visit(directory: string, level: number): Promise<void> {
+    if (level >= fewest) {
+      const repo = await repoOfWorktree(directory);
+      if (repo) return void repos.add(repo);
+    }
+    if (level >= most) return;
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => visit(join(directory, entry.name), level + 1)),
+    );
+  }
+  await visit(folder, 0);
+  return [...repos].sort();
 }
 
 export interface LinkedWorktrees {
@@ -81,10 +147,9 @@ export async function readLinkedWorktrees(repo: string): Promise<LinkedWorktrees
  */
 export async function readCreatedAt(worktree: string): Promise<string | null> {
   try {
-    const link = await readFile(join(worktree, ".git"), "utf8");
-    const gitdir = /^gitdir: (.+)$/m.exec(link)?.[1]?.trim();
+    const gitdir = await readGitdir(worktree);
     if (!gitdir) return null;
-    const { birthtimeMs } = await stat(resolve(worktree, gitdir));
+    const { birthtimeMs } = await stat(gitdir);
     return birthtimeMs > 0 ? new Date(birthtimeMs).toISOString() : null;
   } catch {
     return null;

@@ -1,8 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverRepos, readCreatedAt, readLinkedWorktrees } from "../../src/core/scan/discovery";
+import {
+  discoverRepos,
+  readCreatedAt,
+  readLinkedWorktrees,
+  reposOfWorktrees,
+} from "../../src/core/scan/discovery";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -95,4 +100,32 @@ test("a worktree's creation time is unknown without a readable .git file and Git
   await writeFile(join(root, "garbled", ".git"), "not a gitdir line\n");
   for (const name of ["no-link", "dangling", "garbled", "missing"])
     expect(await readCreatedAt(join(root, name))).toBeNull();
+});
+
+test("follows each worktree's .git file to its main repository, only where the record still exists", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "dash-discover-")));
+  roots.push(root);
+  const agent = join(root, "agent");
+  async function worktree(path: string, gitdir: string, record = true) {
+    await mkdir(path, { recursive: true });
+    await writeFile(join(path, ".git"), `gitdir: ${gitdir}\n`);
+    if (record) await mkdir(resolve(path, gitdir), { recursive: true });
+  }
+  await worktree(join(agent, "a1", "app"), join(root, "code", "app", ".git", "worktrees", "app"));
+  await worktree(join(agent, "a2", "app"), join(root, "code", "app", ".git", "worktrees", "app1"));
+  await worktree(join(agent, "b1", "lib"), "../../../elsewhere/lib/.git/worktrees/lib");
+  await worktree(join(agent, "c1", "gone"), join(root, "gone", ".git", "worktrees", "gone"), false);
+  await worktree(join(agent, "d1", "bare"), join(root, "bare.git", "worktrees", "bare"));
+  await worktree(join(agent, "shallow"), join(root, "shallow", ".git", "worktrees", "shallow"));
+  await mkdir(join(agent, "e1", "plain"), { recursive: true });
+  expect(await reposOfWorktrees(agent, [2, 2])).toEqual([
+    join(root, "code", "app"),
+    join(root, "elsewhere", "lib"),
+  ]);
+  expect(await reposOfWorktrees(agent, [1, 2])).toEqual([
+    join(root, "code", "app"),
+    join(root, "elsewhere", "lib"),
+    join(root, "shallow"),
+  ]);
+  expect(await reposOfWorktrees(join(root, "missing"), [2, 2])).toEqual([]);
 });

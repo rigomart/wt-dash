@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 import { parseArgs } from "../src/cli";
 
-test("uses the projects folder by default and resolves supplied folders independently", () => {
+test("uses the default folders when none are given and resolves supplied folders independently", () => {
   expect(parseArgs([], "/Users/test", "/Users/test/code")).toMatchObject({
-    roots: ["/Users/test/projects"],
+    roots: ["projects", "code", "dev", "src", "work"].map((folder) => `/Users/test/${folder}`),
+    defaults: true,
     depth: 2,
     mode: "run",
   });
@@ -15,6 +16,7 @@ test("uses the projects folder by default and resolves supplied folders independ
     ),
   ).toMatchObject({
     roots: ["/Users/test/work", "/Users/test/personal"],
+    defaults: false,
     depth: 4,
     wtPath: "/custom/wt",
   });
