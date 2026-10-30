@@ -1,5 +1,5 @@
 import { assess } from "../core/assess";
-import type { LineCounts, WorktreeRow } from "../core/types";
+import type { LineCounts, RunningProcess, WorktreeRow } from "../core/types";
 
 export function plain(value: string): string {
   return value.replace(/\p{Cc}/gu, " ");
@@ -149,6 +149,21 @@ export function porcelainPath(line: string): string {
 
 export function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/** Worktrunk's reap leaves a process with a terminal running. */
+export const INTERACTIVE_LABEL = "(terminal)";
+
+/** "2 processes · :3000 :5173" */
+export function processesLabel(processes: RunningProcess[]): string {
+  const ports = [...new Set(processes.flatMap((running) => running.ports))].sort((a, b) => a - b);
+  return [countLabel(processes.length, "process", "processes"), portsLabel(ports)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function portsLabel(ports: number[]): string {
+  return ports.map((port) => `:${port}`).join(" ");
 }
 
 const ROW_KINDS: Array<[WorktreeRow["kind"], string, string]> = [

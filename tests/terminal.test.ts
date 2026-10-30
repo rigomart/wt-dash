@@ -99,6 +99,7 @@ function fakeService(
     errors: {},
     fatalError: null,
     sizing: [],
+    processes: {},
   };
   let refreshes = 0;
   const listeners = new Set<(snapshot: DashboardSnapshot) => void>();

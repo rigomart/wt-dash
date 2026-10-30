@@ -8,6 +8,7 @@ import {
   type CommandRunner,
   type DashboardService,
   type DashboardSnapshot,
+  type RunningProcess,
   type SizeEntry,
   type SizeService,
   type WorktreeRow,
@@ -26,6 +27,11 @@ interface DashboardOptions {
   findOrphans?: (
     repos: Array<{ path: string; linked: LinkedWorktrees | null }>,
   ) => Promise<Orphan[]>;
+  /** Finds the processes running inside `paths` once a scan completes; without it none are shown. */
+  findProcesses?: (
+    paths: string[],
+    signal: AbortSignal,
+  ) => Promise<Record<string, RunningProcess[]>>;
 }
 
 export function createDashboardService(options: DashboardOptions): DashboardService {
@@ -44,6 +50,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     errors: {},
     fatalError: null,
     sizing: [],
+    processes: {},
   };
 
   function publish(next: Omit<DashboardSnapshot, "sizing">): void {
@@ -121,6 +128,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         generation: scanGeneration,
         repos: snapshot.repos,
         rows: kept,
+        processes: snapshot.processes,
         progress: {
           phase: "scanning",
           reposTotal: 0,
@@ -333,6 +341,21 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             completedAt: new Date().toISOString(),
           },
         });
+        // After the listing, so the first rows never wait on it.
+        if (options.findProcesses) await findProcesses(options.findProcesses);
+      }
+      async function findProcesses(
+        find: NonNullable<DashboardOptions["findProcesses"]>,
+      ): Promise<void> {
+        const controller = new AbortController();
+        controllers.add(controller);
+        try {
+          const paths = [...new Set(snapshot.rows.flatMap((row) => row.path ?? []))];
+          const processes = await find(paths, controller.signal);
+          if (current(scanGeneration)) publish({ ...snapshot, processes });
+        } finally {
+          controllers.delete(controller);
+        }
       }
     },
     async refreshSize(worktreeId) {

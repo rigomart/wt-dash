@@ -1,8 +1,8 @@
 import { recentAgentMark } from "../../core/assess";
 import type { RemovalEntry } from "../../core/removal/types";
 import type { WorktreeRow } from "../../core/types";
-import { isSizing } from "../../core/view";
-import { branchLabel, countLabel, rowsLabel, sizeLabel } from "../format";
+import { isSizing, processesOf } from "../../core/view";
+import { branchLabel, countLabel, processesLabel, rowsLabel, sizeLabel } from "../format";
 import {
   cell,
   clip,
@@ -169,6 +169,16 @@ function removeDialog(
       key(theme, "e"),
       dim(confirm.reap ? " leave them" : " stop them"),
     ]);
+  const running = ready.filter((entry) => processesOf(ctx.snapshot, entry.row).length);
+  if (running.length)
+    options.push(
+      ...wrap(
+        running.length === 1
+          ? `Running in ${names(running)}: ${processesLabel(processesOf(ctx.snapshot, running[0]!.row))}`
+          : `Processes are running in ${names(running)}`,
+        inner,
+      ).map((text) => [seg(text)]),
+    );
   const tail: Line[] = [[], ...notes, ...(options.length ? [[], ...options] : []), []];
   const room = Math.max(1, ctx.height - 3 - tail.length);
   const shown = sized.length > room ? sized.slice(0, room - 1) : sized;
