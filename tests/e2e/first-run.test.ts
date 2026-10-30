@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "../../src/cli";
 import { prepareStartup } from "../../src/startup";
 import { inSandbox, withApp, TEST_TIMEOUT } from "../support/app";
@@ -108,6 +108,40 @@ test(
           "Setup checks passed.",
         ].join("\n"),
       );
+    }),
+  TEST_TIMEOUT,
+);
+
+test(
+  "--doctor accepts a Worktrunk built from crates.io, whose --version reads wt 0.80.0 (#59)",
+  () =>
+    inSandbox(async (sandbox) => {
+      await arrangeFirstRun(sandbox);
+      const bin = join(sandbox.root, "cargo-bin");
+      await mkdir(bin);
+      const wt = join(bin, "wt");
+      await writeFile(
+        wt,
+        `#!/bin/sh\nif [ "$1" = --version ]; then echo "wt 0.80.0"; exit 0; fi\nexec '${sandbox.wtPath}' "$@"\n`,
+      );
+      await chmod(wt, 0o755);
+      const child = Bun.spawn(
+        [process.execPath, join(import.meta.dir, "../../src/index.ts"), "--doctor"],
+        {
+          cwd: sandbox.home,
+          env: { ...sandbox.env, PATH: [bin, sandbox.env.PATH].join(delimiter) },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+      expect(stdout).toContain(`Worktrunk: wt 0.80.0 (${wt})`);
+      expect(stdout).toContain("Repositories found: 2");
     }),
   TEST_TIMEOUT,
 );

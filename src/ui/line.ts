@@ -148,8 +148,9 @@ export function wrap(value: string, width: number): string[] {
   let rest = text;
   while (textWidth(rest) > width) {
     const head = cut(rest, width);
-    const breakAt = Math.max(head.lastIndexOf("/") + 1, head.lastIndexOf(" ") + 1);
-    const take = breakAt > width / 3 ? breakAt : head.length;
+    const space = head.lastIndexOf(" ") + 1;
+    const slash = head.lastIndexOf("/") + 1;
+    const take = space > width / 3 ? space : slash > width / 3 ? slash : head.length;
     lines.push(rest.slice(0, take).trimEnd());
     rest = rest.slice(take).trimStart();
   }

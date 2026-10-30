@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { runTerminal } from "../src/ui/terminal";
+import { createTheme } from "../src/ui/theme";
 import type { ActionService, RemovalEntry } from "../src/core/removal/types";
 import {
   ORPHANS,
@@ -599,6 +600,59 @@ test("? opens the key overlay and esc closes it", async () => {
     expect(await ui.frame()).toContain("group by repo");
     await ui.escape();
     expect(await ui.frame()).not.toContain("group by repo");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("at 80x24 the key overlay fits every label whole, in two columns (#59)", async () => {
+  const ui = await start(80, 24, [row("api", 2000)]);
+  try {
+    ui.setup.mockInput.pressKey("?");
+    const frame = await ui.frame();
+    for (const label of [
+      "all Safe in view / project",
+      "remove selected or focused",
+      "dialog: unmerged branches",
+      "dialog: leave processes",
+      "Colors:",
+    ])
+      expect(frame).toContain(label);
+    expect(frame).toMatch(/group by repo or verdict +y enter +confirm in the dialog/);
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("below 80 columns the key overlay keeps two columns, so every group still shows (#59)", async () => {
+  const ui = await start(72, 24, [row("api", 2000)]);
+  try {
+    ui.setup.mockInput.pressKey("?");
+    const frame = await ui.frame();
+    for (const label of ["MOVE", "PROJECTS", "FIND", "CLEAN UP", "OTHER", "quit", "Colors:"])
+      expect(frame).toContain(label);
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("a light terminal's reply to the background query turns the focus bar light (#59)", async () => {
+  const ui = await start(110, 20, [row("api", 2000), row("docs", 500)]);
+  const focusBg = () => {
+    const line = ui.setup
+      .captureSpans()
+      .lines.find(({ spans }) => /^▌ +api /.test(spans.map(({ text }) => text).join("")));
+    return line?.spans.find(({ text }) => text.includes("api"))?.bg.toInts();
+  };
+  try {
+    await ui.frame();
+    expect(focusBg()).toEqual(createTheme("dark").focusBg.toInts());
+    ui.setup.renderer.stdin.emit(
+      "data",
+      Buffer.from("\x1b]10;rgb:0000/0000/0000\x1b\\\x1b]11;rgb:ffff/ffff/ffff\x1b\\"),
+    );
+    await ui.frame();
+    expect(focusBg()).toEqual(createTheme("light").focusBg.toInts());
   } finally {
     await ui.stop();
   }

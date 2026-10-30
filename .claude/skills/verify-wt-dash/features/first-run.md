@@ -20,7 +20,7 @@
 3. Narrow: the table lists `All projects 2`, `app 1`, `lib 1`, each with `REV 1`.
 4. `bun src/index.ts $HOME/empty`: the projects read `No worktrees found in ~/empty.` then `Scan other folders with: wt-dash <folder>`, wide and narrow.
 5. No folder, `HOME=home2`: `No worktrees found in ~/code and ~/.codex/worktrees.`; `--doctor` lists both folders with `0 repositories` and `Repositories found: 0`.
-6. No folder, `HOME=home3`: `No worktrees found, and no folder to scan exists.`; `--doctor` prints `Scan folders: none of ~/projects, ~/code, ~/dev, ~/src, ~/work exists` and `Agent worktree folders: none of the known ones exists`, and exits 0. `--doctor $HOME/projects` (given, missing) still fails with `Scan folder is missing or unreadable: …` and exit 1.
+6. No folder, `HOME=home3`: `No worktrees found, and no folder to scan exists.`; `--doctor` prints `Scan folders: none of ~/projects, ~/code, ~/dev, ~/src, ~/work exists` and `Agent worktree folders: none of the known ones exists`, and exits 0. `--doctor $HOME/projects` (given, missing) still fails with `Scan folder not found: …` and exit 1. Other setups (no Worktrunk, no Git, small terminals, a light theme) are in [setups.md](setups.md).
 
 ## Traps
 

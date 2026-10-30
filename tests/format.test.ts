@@ -88,6 +88,16 @@ test("wrapping prefers path separators", () => {
   ]);
 });
 
+test("wrapping a sentence breaks between words, so the paths in it stay whole (#59)", () => {
+  expect(
+    wrap("No worktrees found in ~/projects, ~/code, ~/.t3/worktrees and ~/.codex/worktrees.", 40),
+  ).toEqual([
+    "No worktrees found in ~/projects,",
+    "~/code, ~/.t3/worktrees and",
+    "~/.codex/worktrees.",
+  ]);
+});
+
 test("lines are cut and padded to an exact width, including wide characters", () => {
   const line = fitLine([seg("🤖 agent"), seg(" working")], 8);
   expect(lineWidth(line)).toBe(8);
