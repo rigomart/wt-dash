@@ -25,7 +25,8 @@ import { verdictColor } from "../theme";
 import { dim, spinner } from "./common";
 import { bodyHeightFor, pad, type RenderContext, type Viewport } from "./layout";
 import { headerLine, listFooter, meterLine, statusLine } from "./chrome";
-import { TOOL_NAMES, field, withDetails } from "./details";
+import { TOOL_NAMES } from "../../core/worktrunk/list";
+import { field, withDetails } from "./details";
 
 /** Folders count by the tool that made them; branches without a worktree apart, since no tool is known. */
 export function toolCounts(rows: WorktreeRow[]): Array<readonly [string, number]> {

@@ -1,5 +1,16 @@
 export type Verdict = "Busy" | "Broken" | "Orphaned" | "Review" | "Safe";
-export type ToolName = "Claude" | "Codex" | "t3" | "Other";
+export type ToolName =
+  | "Claude"
+  | "Codex"
+  | "t3"
+  | "Cursor"
+  | "Conductor"
+  | "Windsurf"
+  | "Gemini"
+  | "ClaudeSquad"
+  | "Superset"
+  | "Worktrunk"
+  | "Other";
 
 export interface ChangeFlags {
   staged: boolean;

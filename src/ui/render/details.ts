@@ -1,5 +1,6 @@
 import { assess, markerNote, removalBlockReason } from "../../core/assess";
-import type { ToolName, WorktreeRow } from "../../core/types";
+import type { WorktreeRow } from "../../core/types";
+import { TOOL_NAMES } from "../../core/worktrunk/list";
 import { isSizing } from "../../core/view";
 import {
   aheadLabel,
@@ -50,13 +51,6 @@ export function withDetails(
     below: 0,
   };
 }
-
-export const TOOL_NAMES: Record<ToolName, string> = {
-  Claude: "Claude Code",
-  Codex: "Codex",
-  t3: "t3",
-  Other: "other",
-};
 
 const SUMMARY_FILE_LINES = 2;
 

@@ -218,6 +218,38 @@ test("a worktree or branch carries its commits beyond main, their line counts, i
   });
 });
 
+test("a worktree in t3's current folder, another tool's or Worktrunk's default one is shown as made by that tool (#43)", async () => {
+  const repo = await sandbox.repo("tools");
+  const placed = {
+    t3: join(sandbox.home, ".t3", "worktrees", "tools", "feature-t3"),
+    Conductor: join(sandbox.home, "conductor", "workspaces", "tools", "nagoya"),
+    Cursor: join(sandbox.home, ".cursor", "worktrees", "tools", "k3x9"),
+    Other: join(sandbox.root, "worktrees", "tools.elsewhere"),
+  };
+  for (const [tool, path] of Object.entries(placed))
+    await repo.git("worktree", "add", "-q", "-b", `from-${tool}`, path, "main");
+  const switched = await sandbox.exec(
+    sandbox.wtPath,
+    ["switch", "--create", "feature/auth", "--no-cd", "--yes"],
+    { cwd: repo.path },
+  );
+  expect(switched.exitCode).toBe(0);
+  const { dashboard } = await sandbox.services();
+  const snapshot = await scan(dashboard, repo);
+  const tools = Object.fromEntries(
+    snapshot.rows
+      .filter((shown) => shown.repoPath === repo.path && shown.path !== null)
+      .map((shown) => [shown.path!, shown.tool]),
+  );
+  expect(tools).toEqual({
+    [placed.t3]: "t3",
+    [placed.Conductor]: "Conductor",
+    [placed.Cursor]: "Cursor",
+    [placed.Other]: "Other",
+    [join(sandbox.scanRoot, "tools.feature-auth")]: "Worktrunk",
+  });
+});
+
 test("readCreatedAt reads when Git created a worktree's record, which later writes don't move, or null without a birth time", async () => {
   const repo = await sandbox.repo("born");
   const path = join(sandbox.root, "worktrees", "born.new");

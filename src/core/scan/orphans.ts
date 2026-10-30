@@ -140,7 +140,7 @@ export function orphanRow({ path, cause }: Orphan): WorktreeRow {
     createdAt: null,
     marker: null,
     markerSetAt: null,
-    tool: toolForPath(path),
+    tool: toolForPath(path, (cause.kind === "gitdirMissing" && cause.repo) || ORPHANS),
     changes: null,
     upstreamAhead: null,
     mainState: null,

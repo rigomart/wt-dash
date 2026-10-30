@@ -2,7 +2,7 @@
 
 See every Git worktree on your Mac or Linux machine in one terminal dashboard, find the ones you can safely delete, and remove them in bulk.
 
-Coding agents create worktrees constantly. Claude Code keeps them in `.claude/worktrees`, Codex in `~/.codex/worktrees`, and other tools elsewhere. Each one carries its own `node_modules`, and nothing cleans them up. A few weeks of agent work can leave dozens of worktrees and many gigabytes behind.
+Coding agents create worktrees constantly. Claude Code keeps them in `.claude/worktrees`, Codex in `~/.codex/worktrees`, Cursor in `~/.cursor/worktrees`, and other tools elsewhere. Each one carries its own `node_modules`, and nothing cleans them up. A few weeks of agent work can leave dozens of worktrees and many gigabytes behind.
 
 wt-dash scans your repositories, lists every linked worktree with its size and Git state, along with local branches left behind without a worktree, and sorts them by how safe they are to delete. Select what you want gone, confirm once, and the removal runs in the background while you keep working.
 
@@ -92,6 +92,23 @@ Removing a worktree often leaves its branch behind. wt-dash lists these local br
 - A recent agent mark makes it Review, as for a worktree.
 
 A blocked row says what to do next, for example "finish or abort the rebase first".
+
+### Which tool made a worktree
+
+wt-dash names the tool that made each worktree from the folder it sits in, with the default folders below. The tool shows in the details and the strip, the projects count worktrees by tool, and `/` finds a tool's worktrees by its name. Anything else, including a tool's worktrees moved to a folder of your choosing, reads "other".
+
+| Tool         | Default folder                                                               |
+| ------------ | ---------------------------------------------------------------------------- |
+| Claude Code  | `<repo>/.claude/worktrees/<name>`                                            |
+| Codex        | `~/.codex/worktrees/<id>/<repo>`                                             |
+| t3           | `~/.t3/worktrees/<repo>/<branch>`, and the older `.t3-lines/lines/worktrees` |
+| Cursor       | `~/.cursor/worktrees/…`                                                      |
+| Conductor    | `~/conductor/workspaces/<repo>/<name>`                                       |
+| Windsurf     | `~/.windsurf/worktrees/<repo>/<name>`                                        |
+| Gemini CLI   | `<repo>/.gemini/worktrees/<name>`                                            |
+| Claude Squad | `~/.claude-squad/worktrees/<name>`                                           |
+| Superset     | `~/.superset/worktrees/…`                                                    |
+| Worktrunk    | `<repo>.<branch>` beside the repository, Worktrunk's default `worktree-path` |
 
 ## Keys
 

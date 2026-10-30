@@ -20,6 +20,7 @@
 5. Notes left on a branch show in both places. After `git config branch.<branch>.description` and `wt config state vars set <key>=<value> --branch <branch>` as the instance's user, and `r`: the strip shows a line under the commits line with the description's first line and each var, joined by `·` (`Spike: try GraphQL` for `leftover/spike`); `i` shows `DESCRIPTION` with every non-blank line of the description, then `VARS` with one `key: value` per line. A row with no notes has no such line or fields.
 6. On a marked row that also has notes, such as `api › agent/old-session` after `wt config state vars set task=cleanup --branch agent/old-session`, the strip still shows `Agent mark from 3d ago, likely stale.`, above `nothing uncommitted`.
 7. For `api › feature/locked`, details read `Locked: agent session` and `Can't be removed: it's locked (agent session); unlock it first`.
+8. The tool comes from the worktree's folder (#43). After `git worktree add -b feature/t3 "$HOME/.t3/worktrees/api/feature" main` as the instance's user and `r`, the strip for `api › feature/t3` reads `t3 · last commit <age> · <sha> · clean · no tracking branch` in both variants, `i` reads `CREATED BY    t3`, `api`'s sidebar details read `other 7 · t3 1 · no workt…`, and the narrow "All projects" strip reads `MADE BY       other 16 · t3 1 · no worktree 2`. The seeded worktrees stay `other` even when the checkout itself sits under `~/.t3/worktrees`.
 
 ## Traps
 

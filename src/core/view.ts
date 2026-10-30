@@ -5,6 +5,7 @@ import {
   type Verdict,
   type WorktreeRow,
 } from "./types";
+import { TOOL_NAMES } from "./worktrunk/list";
 
 export interface ViewOptions {
   search?: string;
@@ -49,7 +50,7 @@ export function selectRows(rows: WorktreeRow[], options: ViewOptions): WorktreeR
     .filter((row) => {
       if (
         search &&
-        !`${row.branch ?? ""}\n${row.path ?? ""}\n${row.repoName}\n${row.tool}`
+        !`${row.branch ?? ""}\n${row.path ?? ""}\n${row.repoName}\n${TOOL_NAMES[row.tool]}`
           .toLocaleLowerCase()
           .includes(search)
       )
