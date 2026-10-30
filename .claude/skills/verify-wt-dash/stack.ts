@@ -8,7 +8,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
-import { createSandbox, OLD_AGE_MS, type Built, type Repo } from "../../../tests/support/fixture";
+import {
+  createSandbox,
+  OLD_AGE_MS,
+  type Built,
+  type Repo,
+  type Sandbox,
+} from "../../../tests/support/fixture";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 const verifyRoot = join(repoRoot, ".verify");
@@ -28,7 +34,7 @@ class Failure extends Error {
   }
 }
 
-interface SeedRow {
+export interface SeedRow {
   repo: string;
   kind: Built["kind"];
   branch: string;
@@ -40,6 +46,18 @@ interface SeedRow {
   note?: string;
   minSizeKiB?: number;
 }
+
+/**
+ * What a `--seed <file>` module's default export returns after building its world in the sandbox: the rows it
+ * made, and optionally another scan root and variables added to the app's environment.
+ */
+export interface SeedWorld {
+  rows: SeedRow[];
+  scanRoot?: string;
+  env?: Record<string, string>;
+}
+
+export type SeedModule = (sandbox: Sandbox) => Promise<SeedWorld>;
 
 interface Instance {
   name: string;
@@ -55,6 +73,8 @@ interface Instance {
   scanRoot: string;
   env: Record<string, string>;
   backdatesOnDisk: boolean;
+  /** The `--seed` module, or null for the default seed. */
+  seedFile?: string | null;
   seed: SeedRow[];
 }
 
@@ -241,13 +261,33 @@ async function waitUntilReady(
   );
 }
 
-async function seed(root: string): Promise<{
+async function seed(
+  root: string,
+  seedFile: string | null,
+): Promise<{
   scanRoot: string;
   env: Record<string, string>;
   backdatesOnDisk: boolean;
   rows: SeedRow[];
 }> {
   const sandbox = await createSandbox({ root });
+  const world = seedFile
+    ? await ((await import(seedFile)) as { default: SeedModule }).default(sandbox)
+    : { rows: await defaultSeed(sandbox) };
+  const env: Record<string, string> = { ...sandbox.env, ...world.env };
+  delete env.NO_COLOR;
+  env.LC_ALL = "en_US.UTF-8";
+  env.LANG = "en_US.UTF-8";
+  env.COLORTERM = "truecolor";
+  return {
+    scanRoot: world.scanRoot ?? sandbox.scanRoot,
+    env,
+    backdatesOnDisk: sandbox.backdatesOnDisk,
+    rows: world.rows,
+  };
+}
+
+async function defaultSeed(sandbox: Sandbox): Promise<SeedRow[]> {
   const inRepo = async (name: string, build: (repo: Repo) => Promise<Built[]>) =>
     build(await sandbox.repo(name));
   const sequence = async (repo: Repo, steps: Array<(repo: Repo) => Promise<Built>>) => {
@@ -288,7 +328,7 @@ async function seed(root: string): Promise<{
     ),
     inRepo("tools", async () => []),
   ]);
-  const rows: SeedRow[] = groups.flat().map((built) => {
+  return groups.flat().map((built) => {
     let expected = built.expected;
     // Without on-disk backdating (Linux) the real binary sees mergedWorktree's worktree as new.
     if (
@@ -310,12 +350,6 @@ async function seed(root: string): Promise<{
       ...(built.minSizeKiB === undefined ? {} : { minSizeKiB: built.minSizeKiB }),
     };
   });
-  const env: Record<string, string> = { ...sandbox.env };
-  delete env.NO_COLOR;
-  env.LC_ALL = "en_US.UTF-8";
-  env.LANG = "en_US.UTF-8";
-  env.COLORTERM = "truecolor";
-  return { scanRoot: sandbox.scanRoot, env, backdatesOnDisk: sandbox.backdatesOnDisk, rows };
 }
 
 async function startApp(instance: Instance): Promise<void> {
@@ -391,6 +425,16 @@ async function up(flags: Record<string, string | true>) {
       `Instance ${name} was started on branch ${instance.branch}; this checkout is on ${branch}.`,
       `Recreate it: bun ${self} down --name ${name} --purge, then up again.`,
     );
+  if (flags.seed === true)
+    throw new Failure("--seed needs a file.", "Example: --seed scripts/readme-images/seed.ts");
+  const seedFile = typeof flags.seed === "string" ? resolve(flags.seed) : null;
+  if (seedFile && !existsSync(seedFile))
+    throw new Failure(`Seed module not found: ${seedFile}`, "Pass a path to a .ts seed module.");
+  if (instance && flags.seed !== undefined && (instance.seedFile ?? null) !== seedFile)
+    throw new Failure(
+      `Instance ${name} was seeded from ${instance.seedFile ?? "the default seed"}.`,
+      `Recreate it: bun ${self} down --name ${name} --purge, then up again.`,
+    );
   const variant: Variant = variantFlag ?? instance?.variant ?? "wide";
   let seeded = false;
   if (!instance) {
@@ -402,7 +446,7 @@ async function up(flags: Record<string, string | true>) {
     await mkdir(p.logs, { recursive: true });
     await mkdir(p.evidence, { recursive: true });
     const started = Date.now();
-    const seededWorld = await seed(p.sandbox);
+    const seededWorld = await seed(p.sandbox, seedFile);
     seeded = true;
     instance = {
       name,
@@ -418,6 +462,7 @@ async function up(flags: Record<string, string | true>) {
       scanRoot: seededWorld.scanRoot,
       env: seededWorld.env,
       backdatesOnDisk: seededWorld.backdatesOnDisk,
+      seedFile,
       seed: seededWorld.rows,
     };
     await saveInstance(instance);
@@ -954,7 +999,7 @@ async function list() {
 }
 
 const COMMANDS = {
-  up: "up --name <n> [--variant wide|narrow]  Seed if new, start wt-dash in tmux, wait until listed. Reuses a running instance (resizing it to the variant).",
+  up: "up --name <n> [--variant wide|narrow] [--seed <file>]  Seed if new, start wt-dash in tmux, wait until listed. Reuses a running instance (resizing it to the variant). --seed builds the sandbox with a module's default export (SeedModule) instead of the test fixture's seed.",
   env: "env --name <n> [--full]  The shell preamble, tmux commands and paths to drive the instance; --full adds its env and the seeded rows with their expected verdicts.",
   doctor: "doctor --name <n>  Read-only health check.",
   state:

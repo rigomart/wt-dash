@@ -28,6 +28,7 @@
     "build": "bun scripts/build.ts",
     "formula": "bun scripts/homebrew.ts",
     "install:local": "sh scripts/install.sh",
+    "readme-images": "bun scripts/readme-images/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
