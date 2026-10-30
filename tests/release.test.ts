@@ -62,3 +62,89 @@ test("local installation handles spaces and creates an executable without changi
   expect(await new Response(installed.stdout).text()).toBe("installed test executable\n");
   expect(await installed.exited).toBe(0);
 });
+
+async function run(command: string[], env: Record<string, string>, cwd?: string) {
+  const child = Bun.spawn(command, { cwd, env, stdout: "pipe", stderr: "pipe" });
+  const [output, error, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { code, output, error };
+}
+
+test("the tap update commits each new formula once, never moves back to an older one, and refuses to run without the deploy key", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dash-tap-"));
+  roots.push(root);
+  await writeFile(join(root, "gitconfig"), "");
+  const env = {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    HOME: root,
+    GIT_CONFIG_GLOBAL: join(root, "gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+  const git = async (cwd: string, ...args: string[]) => {
+    const result = await run(["git", ...args], env, cwd);
+    if (result.code !== 0) throw new Error(`git ${args.join(" ")}: ${result.error}`);
+    return result.output.trim();
+  };
+  const tap = join(root, "homebrew-tap.git");
+  await git(root, "init", "--quiet", "--bare", "--initial-branch=main", tap);
+  await git(root, "clone", "--quiet", tap, join(root, "seed"));
+  await mkdir(join(root, "seed/Formula"));
+  await writeFile(join(root, "seed/Formula/.gitkeep"), "");
+  await writeFile(join(root, "seed/README.md"), "# Tap\n");
+  await git(join(root, "seed"), "add", "-A");
+  await git(
+    join(root, "seed"),
+    "-c",
+    "user.name=Seed",
+    "-c",
+    "user.email=seed@example.com",
+    "commit",
+    "--quiet",
+    "-m",
+    "Seed",
+  );
+  await git(join(root, "seed"), "push", "--quiet", "origin", "main");
+
+  const script = resolve(import.meta.dir, "../scripts/update-tap.sh");
+  const publish = async (version: string, key = "test deploy key") => {
+    const formula = join(root, `wt-dash-${version}.rb`);
+    await writeFile(formula, `class WtDash < Formula\n  version "${version}"\nend\n`);
+    return run(["sh", script, formula, `v${version}`, tap], {
+      ...env,
+      HOMEBREW_TAP_DEPLOY_KEY: key,
+    });
+  };
+  const history = () => git(root, "--git-dir", tap, "log", "--format=%s", "main");
+  const formula = () => git(root, "--git-dir", tap, "show", "main:Formula/wt-dash.rb");
+
+  const first = await publish("0.2.0");
+  expect(first.code).toBe(0);
+  expect(await history()).toBe("wt-dash 0.2.0\nSeed");
+  expect(await formula()).toContain('version "0.2.0"');
+
+  const rerun = await publish("0.2.0");
+  expect(rerun.code).toBe(0);
+  expect(rerun.output).toContain("already has wt-dash 0.2.0");
+  expect(await history()).toBe("wt-dash 0.2.0\nSeed");
+
+  const next = await publish("0.3.0");
+  expect(next.code).toBe(0);
+  expect(await history()).toBe("wt-dash 0.3.0\nwt-dash 0.2.0\nSeed");
+  expect(await formula()).toContain('version "0.3.0"');
+
+  const older = await publish("0.2.0");
+  expect(older.code).toBe(0);
+  expect(older.output).toContain("already has wt-dash 0.3.0, newer than 0.2.0");
+  expect(await history()).toBe("wt-dash 0.3.0\nwt-dash 0.2.0\nSeed");
+  expect(await formula()).toContain('version "0.3.0"');
+
+  const missing = await publish("0.4.0", "");
+  expect(missing.code).not.toBe(0);
+  expect(missing.error).toContain("HOMEBREW_TAP_DEPLOY_KEY is not set");
+  expect(missing.error).toContain("CONTRIBUTING.md");
+  expect(await history()).toBe("wt-dash 0.3.0\nwt-dash 0.2.0\nSeed");
+});
