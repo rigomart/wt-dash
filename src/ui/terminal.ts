@@ -44,7 +44,8 @@ export async function runTerminal(
 
   const actions = options.actions;
   const home = options.home ?? homedir();
-  const theme = createTheme(renderer.themeMode);
+  // The terminal reports its background after the first frame, so start from a guess and follow its answer.
+  let theme = createTheme(renderer.themeMode);
   const viewport: Viewport = { listTop: 0, projectsTop: 0, listScope: "" };
   let snapshot: DashboardSnapshot = service.getSnapshot();
   let state: UiState = initialState();
@@ -207,7 +208,13 @@ export async function runTerminal(
     if (state.toast || spinning(state, snapshot)) dispatch({ type: "tick" });
   }, TICK_MS);
   renderer.keyInput.on("keypress", onKey);
+  function onThemeMode(mode: "dark" | "light"): void {
+    theme = createTheme(mode);
+    draw();
+  }
+
   renderer.on(CliRenderEvents.RESIZE, draw);
+  renderer.on(CliRenderEvents.THEME_MODE, onThemeMode);
   renderer.once("destroy", finish);
   draw();
   void service.refresh();
@@ -219,6 +226,7 @@ export async function runTerminal(
     unsubscribe();
     renderer.keyInput.off("keypress", onKey);
     renderer.off(CliRenderEvents.RESIZE, draw);
+    renderer.off(CliRenderEvents.THEME_MODE, onThemeMode);
     renderer.destroy();
   }
 }

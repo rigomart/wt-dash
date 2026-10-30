@@ -22,13 +22,18 @@ async function executable(path: string): Promise<boolean> {
   }
 }
 
-async function readableFolder(folder: string): Promise<string | null> {
+async function readableFolder(folder: string): Promise<{ path: string } | { problem: string }> {
   try {
-    if (!(await stat(folder)).isDirectory()) return null;
+    if (!(await stat(folder)).isDirectory()) return { problem: "Not a folder" };
     await access(folder, constants.R_OK | constants.X_OK);
-    return await realpath(folder);
-  } catch {
-    return null;
+    return { path: await realpath(folder) };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return { problem: "Scan folder not found" };
+    if (code === "ELOOP") return { problem: "Scan folder is a symbolic link loop" };
+    if (code === "EACCES" || code === "EPERM")
+      return { problem: "Scan folder can't be read (permission denied)" };
+    return { problem: "Scan folder can't be read" };
   }
 }
 
@@ -39,16 +44,14 @@ async function repoSources(options: CliOptions, home: string): Promise<RepoSourc
   };
   for (const root of options.roots) {
     const folder = await readableFolder(root);
-    if (folder) add({ kind: "scan", folder });
+    if ("path" in folder) add({ kind: "scan", folder: folder.path });
     else if (!options.defaults)
-      throw new Error(
-        `Scan folder is missing or unreadable: ${root}\nSupply a folder, for example: wt-dash ~/code`,
-      );
+      throw new Error(`${folder.problem}: ${root}\nSupply a folder, for example: wt-dash ~/code`);
   }
   if (options.defaults)
     for (const { folder: relative, levels } of AGENT_FOLDERS) {
       const folder = await readableFolder(join(home, relative));
-      if (folder) add({ kind: "agent", folder, levels });
+      if ("path" in folder) add({ kind: "agent", folder: folder.path, levels });
     }
   return sources;
 }
@@ -88,38 +91,63 @@ export async function prepareStartup(
   }
   if (!wtPath)
     throw new Error(
-      "Worktrunk was not found. Install it with: brew install worktrunk, or cargo install worktrunk\nOr supply its executable with --wt-path /path/to/wt",
+      options.wtPath
+        ? `Worktrunk was not found at ${options.wtPath}, given with --wt-path.\nSupply the path of the wt executable, or leave --wt-path out to look for it on PATH.`
+        : "Worktrunk was not found. Install it with: brew install worktrunk, or cargo install worktrunk\nOr supply its executable with --wt-path /path/to/wt",
     );
 
   async function readVersion(command: string, name: string): Promise<string> {
+    let detail = "";
     try {
       const result = await runCommand(command, ["--version"], AbortSignal.timeout(5_000), {
         PATH: path,
       });
-      if (result.exitCode !== 0) throw new Error(result.stderr.trim());
-      return result.stdout.trim();
-    } catch {
-      throw new Error(
-        `${name} could not run: ${command}. Check the installation with ${command} --version.`,
-      );
+      if (result.exitCode === 0) return result.stdout.trim();
+      detail = result.stderr.trim().split("\n")[0] ?? "";
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
     }
+    throw new Error(
+      `${name} could not run: ${command}${detail ? ` (${detail})` : ""}. Check the installation with ${command} --version.`,
+    );
   }
   const gitVersion = await readVersion(gitPath, "Git");
   const wtVersion = await readVersion(wtPath, "Worktrunk");
-  const match = /^wt v(\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(wtVersion);
-  const parts = match?.slice(1, 4).map(Number);
+  const parsed = worktrunkVersion(wtVersion);
+  if (!parsed)
+    throw new Error(
+      `Could not read Worktrunk's version from ${wtPath} --version, which printed: ${wtVersion || "nothing"}\nwt-dash needs Worktrunk 0.80.0 or newer. Install a release with: brew install worktrunk, or cargo install worktrunk`,
+    );
+  const parts = parsed.release;
   const old =
-    parts &&
     parts.some(
       (part, i) =>
         part < minimumWorktrunk[i]! &&
         parts.slice(0, i).every((value, j) => value === minimumWorktrunk[j]),
-    );
-  if (!parts || old)
+    ) ||
+    (parsed.prerelease && parts.every((part, i) => part === minimumWorktrunk[i]));
+  if (old)
     throw new Error(
-      `Worktrunk 0.80.0 or newer is required; found ${wtVersion || "unknown version"}.\nUpdate it with: brew upgrade worktrunk`,
+      `Worktrunk 0.80.0 or newer is required; found ${wtVersion} at ${wtPath}.\nUpdate it with: brew upgrade worktrunk, or cargo install worktrunk`,
     );
   return { sources, wtPath, gitVersion, wtVersion };
+}
+
+/**
+ * The release in `wt --version`: `wt v0.80.0` from a Homebrew bottle or a tagged build, `wt 0.80.0` from
+ * crates.io, `wt v0.80.0-3-gabc1234` or `-dirty` from a build past a tag. Any other `-` suffix is a
+ * pre-release, which comes before its release.
+ */
+export function worktrunkVersion(
+  output: string,
+): { release: number[]; prerelease: boolean } | null {
+  const match = /^wt v?(\d+)\.(\d+)\.(\d+)([-+]\S*)?(?:\s|$)/.exec(output);
+  if (!match) return null;
+  const suffix = match[4] ?? "";
+  return {
+    release: match.slice(1, 4).map(Number),
+    prerelease: suffix.startsWith("-") && !/^-(\d+-g[0-9a-f]+|dirty)\b/.test(suffix),
+  };
 }
 
 const repositories = (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`;

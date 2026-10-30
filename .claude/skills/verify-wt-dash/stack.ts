@@ -540,7 +540,7 @@ async function env(flags: Record<string, string | true>) {
       resizeNarrow: `${t} resize-window -t app -x ${VARIANTS.narrow.cols} -y ${VARIANTS.narrow.rows}`,
       watchReadOnly: `${t} attach -r -t app`,
       state: `bun ${self} state --name ${name}`,
-      image: `bun ${self} image --name ${name} --out <feature>-<state>-<variant> [--from <capture.ansi>] [--rows a-b] [--cols a-b]`,
+      image: `bun ${self} image --name ${name} --out <feature>-<state>-<variant> [--from <capture.ansi>] [--rows a-b] [--cols a-b] [--theme dark|light]`,
     },
     ...(full ? { env: instance.env } : {}),
     // Run git or wt as the instance's user, to arrange a precondition: eval this in the same shell call.
@@ -681,29 +681,62 @@ async function state(flags: Record<string, string | true>) {
   return { name, repos, removalsLog: removals };
 }
 
-const PALETTE = [
-  "#1d1f21",
-  "#cc6666",
-  "#b5bd68",
-  "#f0c674",
-  "#81a2be",
-  "#b294bb",
-  "#8abeb7",
-  "#c5c8c6",
-  "#969896",
-  "#d54e53",
-  "#b9ca4a",
-  "#e7c547",
-  "#7aa6da",
-  "#c397d8",
-  "#70c0b1",
-  "#eaeaea",
-];
-const DEFAULT_FG = "#c5c8c6";
-const DEFAULT_BG = "#1d1f21";
+interface Palette {
+  ansi: string[];
+  fg: string;
+  bg: string;
+}
 
-function color256(index: number): string {
-  if (index < 16) return PALETTE[index]!;
+/** Tomorrow Night, and macOS Terminal's default Basic profile (what a new Mac user sees). */
+const PALETTES: Record<"dark" | "light", Palette> = {
+  dark: {
+    ansi: [
+      "#1d1f21",
+      "#cc6666",
+      "#b5bd68",
+      "#f0c674",
+      "#81a2be",
+      "#b294bb",
+      "#8abeb7",
+      "#c5c8c6",
+      "#969896",
+      "#d54e53",
+      "#b9ca4a",
+      "#e7c547",
+      "#7aa6da",
+      "#c397d8",
+      "#70c0b1",
+      "#eaeaea",
+    ],
+    fg: "#c5c8c6",
+    bg: "#1d1f21",
+  },
+  light: {
+    ansi: [
+      "#000000",
+      "#990000",
+      "#00a600",
+      "#999900",
+      "#0000b2",
+      "#b200b2",
+      "#00a6b2",
+      "#bfbfbf",
+      "#666666",
+      "#e50000",
+      "#00d900",
+      "#e5e500",
+      "#0000ff",
+      "#e500e5",
+      "#00e5e5",
+      "#e5e5e5",
+    ],
+    fg: "#000000",
+    bg: "#ffffff",
+  },
+};
+
+function color256(index: number, palette: Palette): string {
+  if (index < 16) return palette.ansi[index]!;
   if (index >= 232) {
     const level = 8 + (index - 232) * 10;
     return `rgb(${level},${level},${level})`;
@@ -735,7 +768,7 @@ const plain = (): Style => ({
   strike: false,
 });
 
-function applySgr(style: Style, params: number[]): void {
+function applySgr(style: Style, params: number[], palette: Palette): void {
   if (!params.length) params = [0];
   for (let index = 0; index < params.length; index++) {
     const code = params[index]!;
@@ -751,16 +784,16 @@ function applySgr(style: Style, params: number[]): void {
     else if (code === 24) style.underline = false;
     else if (code === 27) style.reverse = false;
     else if (code === 29) style.strike = false;
-    else if (code >= 30 && code <= 37) style.fg = PALETTE[code - 30]!;
-    else if (code >= 90 && code <= 97) style.fg = PALETTE[code - 82]!;
-    else if (code >= 40 && code <= 47) style.bg = PALETTE[code - 40]!;
-    else if (code >= 100 && code <= 107) style.bg = PALETTE[code - 92]!;
+    else if (code >= 30 && code <= 37) style.fg = palette.ansi[code - 30]!;
+    else if (code >= 90 && code <= 97) style.fg = palette.ansi[code - 82]!;
+    else if (code >= 40 && code <= 47) style.bg = palette.ansi[code - 40]!;
+    else if (code >= 100 && code <= 107) style.bg = palette.ansi[code - 92]!;
     else if (code === 39) style.fg = null;
     else if (code === 49) style.bg = null;
     else if (code === 38 || code === 48) {
       let value: string | null = null;
       if (params[index + 1] === 5) {
-        value = color256(params[index + 2] ?? 0);
+        value = color256(params[index + 2] ?? 0, palette);
         index += 2;
       } else if (params[index + 1] === 2) {
         value = `rgb(${params[index + 2] ?? 0},${params[index + 3] ?? 0},${params[index + 4] ?? 0})`;
@@ -775,10 +808,10 @@ function applySgr(style: Style, params: number[]): void {
 const escapeHtml = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-function css(style: Style): string {
-  let fg = style.fg ?? DEFAULT_FG;
+function css(style: Style, palette: Palette): string {
+  let fg = style.fg ?? palette.fg;
   let bg = style.bg;
-  if (style.reverse) [fg, bg] = [bg ?? DEFAULT_BG, fg];
+  if (style.reverse) [fg, bg] = [bg ?? palette.bg, fg];
   const rules = [`color:${fg}`];
   if (bg) rules.push(`background:${bg}`);
   if (style.bold) rules.push("font-weight:bold");
@@ -797,6 +830,7 @@ function ansiToHtml(
   rows: [number, number] | null,
   cols: [number, number] | null,
   width: number,
+  palette: Palette,
 ): string {
   const lines = capture.replace(/\n$/, "").split("\n");
   const [firstRow, lastRow] = rows ?? [1, lines.length];
@@ -812,7 +846,7 @@ function ansiToHtml(
       const start = cell;
       cell += cells;
       if (!keep || start < firstCol || start + cells - 1 > lastCol) return;
-      const look = css(style);
+      const look = css(style, palette);
       if (look !== open) {
         if (open !== null) html += "</span>";
         html += `<span style="${look}">`;
@@ -830,7 +864,7 @@ function ansiToHtml(
     for (const match of line.matchAll(pattern)) {
       text(line.slice(last, match.index));
       if (match[1] !== undefined)
-        applySgr(style, match[1] ? match[1].split(/[;:]/).map(Number) : []);
+        applySgr(style, match[1] ? match[1].split(/[;:]/).map(Number) : [], palette);
       last = match.index + match[0].length;
     }
     text(line.slice(last));
@@ -847,7 +881,7 @@ function ansiToHtml(
   });
   return `<!doctype html><meta charset="utf-8"><style>
 body{margin:0;background:#888;}
-#screen{display:inline-block;padding:12px 14px;background:${DEFAULT_BG};color:${DEFAULT_FG};
+#screen{display:inline-block;padding:12px 14px;background:${palette.bg};color:${palette.fg};
 font:14px/1.2 Menlo,"SF Mono",Monaco,"DejaVu Sans Mono",monospace;white-space:pre;}
 #screen i.w{display:inline-block;width:2ch;font-style:normal;text-align:center;overflow:hidden;vertical-align:top;}
 #screen div{height:1.2em;}
@@ -897,7 +931,16 @@ async function image(flags: Record<string, string | true>) {
   }
   const widthCells =
     Number(paneInfo(instance.socket)?.size.split("x")[0]) || VARIANTS[instance.variant].cols;
-  const html = ansiToHtml(source, range(flags.rows, "rows"), range(flags.cols, "cols"), widthCells);
+  const theme = flags.theme ?? "dark";
+  if (theme !== "dark" && theme !== "light")
+    throw new Failure("--theme must be dark or light.", "Omit it for the dark palette.");
+  const html = ansiToHtml(
+    source,
+    range(flags.rows, "rows"),
+    range(flags.cols, "cols"),
+    widthCells,
+    PALETTES[theme],
+  );
   await mkdir(p.evidence, { recursive: true });
   const htmlPath = join(p.evidence, `${out}.html`);
   const pngPath = join(p.evidence, `${out}.png`);
@@ -1005,7 +1048,7 @@ const COMMANDS = {
   state:
     "state --name <n> [--log <lines>]  Read-only: git worktree list and git branch per repo, and the removals.log tail.",
   image:
-    "image --name <n> --out <feature>-<state>-<variant> [--from <capture.ansi>] [--rows a-b] [--cols a-b]  PNG of the pane (or a saved capture), cropped, into evidence/.",
+    "image --name <n> --out <feature>-<state>-<variant> [--from <capture.ansi>] [--rows a-b] [--cols a-b] [--theme dark|light]  PNG of the pane (or a saved capture), cropped, into evidence/, in a dark palette or a light one (white background).",
   down: "down --name <n> [--purge] [--dry-run]  Stop the instance's tmux server and the processes it started. --purge also deletes the sandbox; logs/ and evidence/ survive.",
   list: "list  Instances under .verify/ and whether each is running.",
 };

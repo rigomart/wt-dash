@@ -1,4 +1,4 @@
-import { cell, fitLine, seg, type Line } from "../line";
+import { cell, fitLine, lineWidth, seg, type Line } from "../line";
 import type { UiState } from "../state";
 import { dim } from "./common";
 import type { RenderContext } from "./layout";
@@ -37,10 +37,11 @@ function helpGroups(_state: UiState): Array<[string, Array<[string, string]>]> {
       "CLEAN UP",
       [
         ["space", "select row"],
-        ["a", "all Safe in view or project"],
+        ["a", "all Safe in view / project"],
         ["enter x", "remove selected or focused"],
         ["y enter", "confirm in the dialog"],
-        ["D e", "dialog: branches · processes"],
+        ["D", "dialog: unmerged branches"],
+        ["e", "dialog: leave processes"],
         ["enter", "on Broken: prune record"],
       ],
     ],
@@ -67,18 +68,20 @@ export function withHelp(base: Line[], state: UiState, ctx: RenderContext): Line
       seg(action),
     ]),
   ]);
+  const leftColumn = groups
+    .filter((_, index) => index % 2 === 0)
+    .flatMap((group, index) => (index ? [[], ...group] : group));
+  const rightColumn = groups
+    .filter((_, index) => index % 2 === 1)
+    .flatMap((group, index) => (index ? [[], ...group] : group));
+  const columnWidth = (column: Line[]) => Math.max(...column.map(lineWidth));
+  const whole = columnWidth(leftColumn);
+  const left = whole + 2 + columnWidth(rightColumn) <= inner ? whole : Math.floor((inner - 2) / 2);
   let content: Line[];
   if (inner >= 60) {
-    const half = Math.floor((inner - 2) / 2);
-    const leftColumn = groups
-      .filter((_, index) => index % 2 === 0)
-      .flatMap((group, index) => (index ? [[], ...group] : group));
-    const rightColumn = groups
-      .filter((_, index) => index % 2 === 1)
-      .flatMap((group, index) => (index ? [[], ...group] : group));
     const rows = Math.max(leftColumn.length, rightColumn.length);
     content = Array.from({ length: rows }, (_, index) => [
-      ...fitLine(leftColumn[index] ?? [], half),
+      ...fitLine(leftColumn[index] ?? [], left),
       seg("  "),
       ...(rightColumn[index] ?? []),
     ]);
