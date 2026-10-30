@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix="wt-dash-smoke-") as temporary:
     root = Path(temporary).resolve()
     executable = root / "wt-dash"
     shutil.copy2(binary, executable)
-    environment = dict(os.environ, HOME=str(root), TERM="xterm-256color",
+    environment = dict(os.environ, HOME=str(root), XDG_STATE_HOME=str(root / "state"), TERM="xterm-256color",
                        GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1",
                        GIT_AUTHOR_NAME="Release test", GIT_AUTHOR_EMAIL="release@example.invalid",
                        GIT_COMMITTER_NAME="Release test", GIT_COMMITTER_EMAIL="release@example.invalid")

@@ -42,7 +42,7 @@ If your shell can't find `wt-dash`, add `~/.local/bin` to your PATH.
    wt-dash
    ```
 
-   With no folders, wt-dash scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, and follows the worktrees in coding agents' folders, such as `~/.codex/worktrees`, back to their repositories. To scan somewhere else, name the folders: `wt-dash ~/repos`. `wt-dash --doctor` shows what it finds without opening the dashboard.
+   With no folders, wt-dash scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, and follows the worktrees in coding agents' folders, such as `~/.codex/worktrees`, back to their repositories. To scan somewhere else, name the folders: `wt-dash ~/repos`. wt-dash remembers every repository it finds, so later runs without folders list those too. `wt-dash --doctor` shows what it finds without opening the dashboard.
 
 2. **Read the verdicts.** Each worktree, and each local branch left without one, gets a verdict, with its Git status and the reason next to it. The strip under the list describes the focused row.
 
@@ -221,7 +221,7 @@ An orphaned folder is deleted only if it is still the folder you confirmed and s
 ### Options
 
 ```sh
-wt-dash                  # scan the usual code folders and agents' worktree folders
+wt-dash                  # scan the usual code folders and agents' worktree folders, plus every repository found before
 wt-dash ~/code ~/work    # scan only these folders
 wt-dash . --depth 0      # just the current repository
 wt-dash --doctor         # check Git, Worktrunk and folder access without opening the dashboard
@@ -237,6 +237,8 @@ wt-dash --doctor         # check Git, Worktrunk and folder access without openin
 wt-dash looks for repositories up to two folder levels below each folder (`--depth` changes this). Point it at main repositories, not linked worktrees, or at the folders that contain them. Worktrees stored elsewhere still show up, because Worktrunk lists every worktree linked to a repository wherever it lives.
 
 Without folders, it scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, each only if it exists, and follows each worktree in the agents' folders in your home folder (those in [Which tool made a worktree](#which-tool-made-a-worktree)) back to its repository, so a repository with an agent worktree shows up wherever it lives. If that finds nothing, wt-dash says which folders it scanned; `wt-dash --doctor` lists them with how many repositories each found.
+
+wt-dash remembers every repository it finds, whether in those folders, through an agent's worktree, or in folders you name, in `~/.local/state/wt-dash/repos.json` (`$XDG_STATE_HOME/wt-dash/repos.json` when `XDG_STATE_HOME` is set). A run without folders lists the remembered repositories too, so running `wt-dash ~/elsewhere` once is enough for a repository outside the usual folders. A run with folders still shows only those folders, and only adds to the list. A repository whose folder is gone, or is no longer a Git repository, is dropped from the list at the next scan. To forget them all, delete the file. `wt-dash --doctor` shows the file and how many repositories it holds.
 
 ### Wide and narrow terminals
 

@@ -13,6 +13,8 @@ Usage: wt-dash [options] [folder ...]
 Without folders, scan ${DEFAULT_SCAN_FOLDERS.map((folder) => `~/${folder}`).join(", ")} where they exist,
 and the repositories of the worktrees in coding agents' worktree folders, such as ~/.codex/worktrees.
 Or supply one or more repositories or parent folders.
+Every repository found is remembered, and later runs without folders list it too.
+To forget them, delete ~/.local/state/wt-dash/repos.json (in $XDG_STATE_HOME when set).
 
 Options:
   --depth <number>    Folder levels to search below each root (0–20; default: 2)
