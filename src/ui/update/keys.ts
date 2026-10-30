@@ -234,7 +234,7 @@ function onListKey(state: UiState, key: Key, ctx: Context): Result {
   if (key.name === "pagedown") return same(move(state, view, Math.max(1, ctx.pageSize - 1)));
   if (key.name === "home" || key.char === "g") return same(move(state, view, "first"));
   if (key.name === "end" || key.char === "G") return same(move(state, view, "last"));
-  if (/^[1-5]$/.test(key.char)) return same({ ...state, tab: TABS[Number(key.char) - 1]! });
+  if (/^[1-6]$/.test(key.char)) return same({ ...state, tab: TABS[Number(key.char) - 1]! });
   if (key.name === "left" || key.char === "h" || key.name === "tab")
     return same(openScreen(state, { kind: "projects" }));
   if (key.char === "s") {

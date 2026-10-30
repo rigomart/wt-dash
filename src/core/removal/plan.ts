@@ -5,6 +5,7 @@ import { failure } from "../process";
 import { enrichRows } from "../scan/enrich";
 import type { CommandRunner, WorktreeRow } from "../types";
 import { listArgs, parseWorktrunk } from "../worktrunk/list";
+import { planOrphan } from "./orphan";
 import type { ActionOptions, FileReport, RemovalEntry, RemovalPlan } from "./types";
 
 export function stamp(row: WorktreeRow): string {
@@ -135,7 +136,12 @@ export async function planRemoval(
   options: Omit<ActionOptions, "logPath">,
 ): Promise<RemovalPlan> {
   const entries: RemovalEntry[] = [];
-  const repos = [...new Set(rows.map((row) => row.repoPath))];
+  const orphans = rows.map(async (row, index) => {
+    if (row.kind === "orphan") entries[index] = await planOrphan(row);
+  });
+  const repos = [
+    ...new Set(rows.filter((row) => row.kind !== "orphan").map((row) => row.repoPath)),
+  ];
   let nextRepo = 0;
   async function worker(): Promise<void> {
     while (nextRepo < repos.length) {
@@ -164,6 +170,9 @@ export async function planRemoval(
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(4, repos.length) }, () => worker()));
+  await Promise.all([
+    ...orphans,
+    ...Array.from({ length: Math.min(4, repos.length) }, () => worker()),
+  ]);
   return { entries };
 }

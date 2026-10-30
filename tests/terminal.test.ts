@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { runTerminal } from "../src/ui/terminal";
 import type { ActionService, RemovalEntry } from "../src/core/removal/types";
-import type { DashboardService, DashboardSnapshot, WorktreeRow } from "../src/core/types";
+import {
+  ORPHANS,
+  type DashboardService,
+  type DashboardSnapshot,
+  type WorktreeRow,
+} from "../src/core/types";
 
 function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}): WorktreeRow {
   return {
@@ -45,6 +50,35 @@ function row(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}):
     reason: "Integrated into main",
     ...overrides,
   };
+}
+
+function orphan(id: string, sizeKiB: number, overrides: Partial<WorktreeRow> = {}): WorktreeRow {
+  return row(id, sizeKiB, {
+    id: `${ORPHANS}\0${id}`,
+    kind: "orphan",
+    repoPath: ORPHANS,
+    repoName: "Orphaned folders",
+    path: `/repos/.codex/worktrees/${id}/app`,
+    tool: "Codex",
+    branch: null,
+    headSha: null,
+    committedAt: null,
+    createdAt: null,
+    changes: null,
+    upstreamAhead: null,
+    mainState: null,
+    defaultBranch: null,
+    mainBase: null,
+    verdict: "Orphaned",
+    reason: `Its repository at /repos/old/${id} no longer exists.`,
+    orphan: {
+      kind: "gitdirMissing",
+      gitdir: `/repos/old/${id}/.git/worktrees/app`,
+      repo: `/repos/old/${id}`,
+      repoExists: false,
+    },
+    ...overrides,
+  });
 }
 
 function fakeService(
@@ -627,8 +661,8 @@ test("below 100 columns, several projects open on a projects table, and enter sh
     expect(frame).toContain("2 projects · 3 worktrees");
     expect(frame).toContain("PROJECT");
     expect(frame).toContain("SAFE SIZE");
-    expect(frame).toMatch(/All projects\s+3\s+2\s+1\s+·\s+·\s+4\.9 MB\s+5\.4 MB/);
-    expect(focused(frame)).toMatch(/alpha\s+2\s+1\s+1\s+·\s+·\s+2\.0 MB\s+2\.4 MB/);
+    expect(frame).toMatch(/All projects\s+3\s+2\s+1\s+·\s+·\s+·\s+4\.9 MB\s+5\.4 MB/);
+    expect(focused(frame)).toMatch(/alpha\s+2\s+1\s+1\s+·\s+·\s+·\s+2\.0 MB\s+2\.4 MB/);
     expect(frame).toContain("enter open");
     ui.setup.mockInput.pressArrow("down");
     ui.setup.mockInput.pressEnter();
@@ -880,6 +914,191 @@ test("a branch without a worktree reads as a branch, with its stale agent mark i
     expect(frame).toContain("Agent mark from 28d ago, likely stale.");
     expect(frame).not.toContain("checking files");
     expect(inspected).toBe(0);
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("orphans sit last in the sidebar and their own section, read by folder name, and never get a file check", async () => {
+  let inspected = 0;
+  const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
+    inspectFiles: async () => {
+      inspected++;
+      return { localFiles: [], ignoredFiles: [], disposableIgnored: 0 };
+    },
+  });
+  const ui = await start(
+    140,
+    30,
+    [
+      row("api", 2000),
+      row("web", 3000, { repoName: "beta", repoPath: "/repos/beta", path: "/repos/beta/web" }),
+      orphan("abcd", 5000),
+      orphan("ef01", 1000, {
+        orphan: { kind: "emptyShell" },
+        path: "/repos/.codex/worktrees/ef01",
+      }),
+    ],
+    actions,
+  );
+  try {
+    let frame = await ui.frame();
+    const sidebar = frame.split("\n").map((line) => line.slice(0, line.indexOf(" │ ")).trimEnd());
+    expect(
+      sidebar.filter((line) => /^. (All projects|alpha|beta|Orphaned folders) \d/.test(line)),
+    ).toEqual([
+      expect.stringMatching(/^  All projects 4\s+4\.9 MB$/),
+      expect.stringMatching(/^▌ alpha 1\s+2\.0 MB$/),
+      expect.stringMatching(/^  beta 1\s+2\.9 MB$/),
+      expect.stringMatching(/^  Orphaned folders 2$/),
+    ]);
+    ui.setup.mockInput.pressKey("g");
+    frame = await ui.frame();
+    expect(frame.split("\n")[0]).toContain("2 projects · 2 worktrees and 2 orphaned folders");
+    expect(withoutSidebar(frame)).toContain(
+      " All 4  Safe 2 · 4.9 MB  Review 0  Busy 0  Broken 0  Orphaned 2 ",
+    );
+    ui.setup.mockInput.pressKey("G");
+    frame = await ui.frame();
+    const card = frame.split("\n").map((line) => line.slice(0, line.indexOf(" │ ")).trimEnd());
+    expect(card).toContain("  2 folders no repo knows");
+    expect(card).toContain("  up to 5.9 MB");
+    expect(card).toContain("  Codex 2");
+    expect(card).toContain("  largest 4.9 MB · abcd/app");
+    expect(card).not.toContain("  nothing uncommitted");
+    expect(frame).toContain("wt-dash › Orphaned folders");
+    expect(frame).toMatch(/○ ORPHANED {2}2 orphaned folders · 5\.9 MB · no repository knows it/);
+    expect(frame).toMatch(
+      /□ abcd\/app +repository gone {2}Its repository at ~\/old\/abcd no longer exi… +\? +4\.9 MB/,
+    );
+    expect(frame).toMatch(/ef01 +no worktree inside {2}Codex left this folder behind/);
+    ui.setup.mockInput.pressArrow("right");
+    await Bun.sleep(300);
+    frame = await ui.frame();
+    expect(focused(frame)).toContain("app");
+    const strip = withoutSidebar(frame);
+    expect(strip).toContain("abcd/app  ● Orphaned · repository gone");
+    expect(strip).toContain("~/.codex/worktrees/abcd/app");
+    expect(strip).toContain("Its repository at ~/old/abcd no longer exists.");
+    expect(strip).toContain("Codex · 4.9 MB · measured");
+    expect(strip).not.toContain("last commit");
+    expect(strip).not.toContain("checking files");
+    expect(strip).toContain("space select");
+    expect(inspected).toBe(0);
+    ui.setup.mockInput.pressKey("i");
+    frame = withoutSidebar(await ui.frame());
+    expect(frame).toContain("Its repository at ~/old/abcd no longer exists.");
+    expect(frame).toMatch(/CREATED BY +Codex/);
+    expect(frame).toMatch(/SIZE +4\.9 MB · measured/);
+    expect(frame).not.toContain("Orphaned folders / app");
+    expect(frame).not.toContain("LAST COMMIT");
+    expect(frame).not.toContain("UPSTREAM");
+    expect(frame).not.toContain("CHANGES");
+    expect(frame).not.toContain("FILES");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("removing an orphan says wt-dash deletes it itself, and offers e only with a worktree in the batch", async () => {
+  const folder = orphan("abcd", 5000);
+  const { actions, executed } = fakeActions((rows) => rows.map((item) => entry(item)));
+  const ui = await start(
+    130,
+    24,
+    [
+      row("api", 2000),
+      row("web", 3000, { repoName: "beta", repoPath: "/repos/beta", path: "/repos/beta/web" }),
+      folder,
+    ],
+    actions,
+  );
+  try {
+    ui.setup.mockInput.pressKey("G");
+    ui.setup.mockInput.pressArrow("right");
+    await ui.frame();
+    ui.setup.mockInput.pressKey("x");
+    let frame = await ui.frame();
+    expect(frame).toContain("Remove 1 orphaned folder · up to 4.9 MB?");
+    expect(frame).toContain(
+      "No repository tracks abcd/app, so wt-dash deletes it itself, unchecked,",
+    );
+    expect(frame).not.toContain("Stops processes running inside");
+    expect(frame).not.toContain("Nothing uncommitted");
+    await ui.escape();
+    ui.setup.mockInput.pressKey(" ");
+    ui.setup.mockInput.pressKey("g");
+    ui.setup.mockInput.pressKey("\t");
+    ui.setup.mockInput.pressKey("g");
+    ui.setup.mockInput.pressKey("\t");
+    await ui.frame();
+    ui.setup.mockInput.pressKey("g");
+    ui.setup.mockInput.pressKey(" ");
+    ui.setup.mockInput.pressKey("x");
+    frame = await ui.frame();
+    expect(frame).toMatch(/Remove 1 worktree and 1 orphaned folder · up to \d/);
+    expect(frame).toContain(
+      "No repository tracks abcd/app, so wt-dash deletes it itself, unchecked,",
+    );
+    expect(frame).toContain("Stops processes running inside");
+    expect(
+      frame,
+      "clean note covers the worktree alone; the orphan's files were never checked",
+    ).toContain("Nothing uncommitted in the worktrees.");
+    ui.setup.mockInput.pressKey("y");
+    frame = await ui.frame();
+    expect(executed).toHaveLength(1);
+    expect(Object.keys(executed[0]!)).toContain(folder.id);
+    expect(frame).toContain("Removed 1 worktree and 1 orphaned folder");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("at 80 columns the projects table fits a column per verdict, and the orphans' details hold no repository path", async () => {
+  const ui = await start(80, 24, [
+    row("api", 2000),
+    row("web", 3000, { repoName: "beta", repoPath: "/repos/beta", path: "/repos/beta/web" }),
+    orphan("abcd", 5000),
+  ]);
+  try {
+    let frame = await ui.frame();
+    const lines = frame.split("\n");
+    expect(lines.find((line) => line.includes("PROJECT"))).toBe(
+      "  PROJECT            WORKTREES  SAFE  REV  BUSY  BRK  ORPH  SAFE SIZE      TOTAL",
+    );
+    const names = lines
+      .map((line) => line.match(/^. (All projects|alpha|beta|Orphaned folders) +\d/)?.[1])
+      .filter(Boolean);
+    expect(names).toEqual(["All projects", "alpha", "beta", "Orphaned folders"]);
+    expect(frame).toMatch(/Orphaned folders +1 +· +· +· +· +1 +· +4\.9 MB/);
+    ui.setup.mockInput.pressKey("G");
+    frame = await ui.frame();
+    expect(frame).toContain("Orphaned folders  1 folder no repo knows");
+    expect(frame).toMatch(/SIZE +up to 4\.9 MB/);
+    expect(frame).toMatch(/MADE BY +Codex 1/);
+    expect(frame).toMatch(/LARGEST +abcd\/app · 4\.9 MB/);
+    expect(frame).not.toContain("SAFE TO FREE");
+    expect(frame).not.toContain("~/orphans");
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("the Orphaned tab is the sixth, shortened with the others on a narrow list, and in the key overlay", async () => {
+  const ui = await start(60, 16, [orphan("abcd", 5000)]);
+  try {
+    ui.setup.mockInput.pressKey("\r");
+    let frame = await ui.frame();
+    expect(frame).toContain(" All 1  Safe 0  Rev 0  Busy 0  Brk 0  Orph 1 ");
+    ui.setup.mockInput.pressKey("6");
+    frame = await ui.frame();
+    expect(frame).toContain("app");
+    ui.setup.mockInput.pressKey("2");
+    expect(await ui.frame()).toContain("No Safe worktrees. Press 1 to see all.");
+    ui.setup.mockInput.pressKey("?");
+    frame = await ui.frame();
+    expect(frame).toContain("1-6");
   } finally {
     await ui.stop();
   }

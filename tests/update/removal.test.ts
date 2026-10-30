@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test";
-import { context, entry, openedWorktreeList, press, row, send } from "../support/update";
+import {
+  beta,
+  context,
+  entry,
+  openedWorktreeList,
+  orphan,
+  press,
+  row,
+  send,
+} from "../support/update";
+import { ORPHANS } from "../../src/core/types";
 import { listView } from "../../src/ui/selectors";
 import { CONFIRM_ARM_MS } from "../../src/ui/state";
 
@@ -218,4 +228,49 @@ test("enter on a Broken row prunes its repository instead of removing", () => {
     key: { name: "return", char: "\r", ctrl: false },
   });
   expect(result.effects).toEqual([{ type: "preparePrune", token: 1, repoPath: "/repos/alpha" }]);
+});
+
+test("space selects an orphan, a leaves it out, and its removal refreshes the orphans", () => {
+  const folder = orphan("x", 50);
+  const ctx = context([row("a", 10), beta("b", 20, { verdict: "Review" }), folder]);
+  let state = press(openedWorktreeList(ctx), ctx, "a");
+  expect([...state.selected]).toEqual(["a"]);
+  state = press(state, ctx, "G", " ");
+  expect([...state.selected].sort()).toEqual(["a", folder.id].sort());
+  const result = send(state, ctx, { type: "key", key: { name: "x", char: "x", ctrl: false } });
+  expect(result.effects[0]).toMatchObject({ type: "prepareRemoval" });
+  expect(result.state.pending?.label).toBe("Checking 1 worktree and 1 orphaned folder…");
+  const plan = { entries: [entry(row("a", 10)), entry(folder)] };
+  state = send(result.state, ctx, {
+    type: "planReady",
+    token: result.state.pending!.token,
+    plan,
+  }).state;
+  const started = send(state, ctx, { type: "key", key: { name: "y", char: "y", ctrl: false } });
+  const job = started.state.jobs[0]!;
+  expect(job.order).toEqual(["a", folder.id]);
+  const done = send(started.state, ctx, {
+    type: "removalDone",
+    jobId: job.id,
+    result: {
+      items: [
+        { id: "a", status: "removed", branchOutcome: "deleted" },
+        { id: folder.id, status: "removed", branchOutcome: "not_attempted" },
+      ],
+      freedKiB: 60,
+      warnings: [],
+    },
+  });
+  expect(done.state.toast?.text).toBe("Removed 1 worktree and 1 orphaned folder · freed 60 KB");
+  expect(done.effects).toEqual([{ type: "refresh", repos: ["/repos/alpha", ORPHANS] }]);
+});
+
+test("enter on a focused orphan opens its removal, not a prune", () => {
+  const folder = orphan("x", 50);
+  const ctx = context([folder]);
+  const result = send(openedWorktreeList(ctx), ctx, {
+    type: "key",
+    key: { name: "return", char: "\r", ctrl: false },
+  });
+  expect(result.effects).toEqual([{ type: "prepareRemoval", token: 1, rows: [folder] }]);
 });

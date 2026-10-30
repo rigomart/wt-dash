@@ -1,4 +1,4 @@
-import type { ToolName, Verdict, WorktreeRow } from "../../core/types";
+import { ORPHANS, type ToolName, type Verdict, type WorktreeRow } from "../../core/types";
 import { agoLabel, branchLabel, changesLabel, countLabel, homePath, sizeLabel } from "../format";
 import {
   cell,
@@ -15,6 +15,7 @@ import {
 import {
   projectsReady,
   projectsView,
+  repoCount,
   visibleRows,
   type Project,
   type ProjectsView,
@@ -27,14 +28,14 @@ import { headerLine, listFooter, meterLine, statusLine } from "./chrome";
 import { TOOL_NAMES } from "../../core/worktrunk/list";
 import { field, withDetails } from "./details";
 
-/** Branches without a worktree are counted apart: no tool is known to have made them. */
+/** Folders count by the tool that made them; branches without a worktree apart, since no tool is known. */
 export function toolCounts(rows: WorktreeRow[]): Array<readonly [string, number]> {
   const counts: Array<readonly [string, number]> = (Object.keys(TOOL_NAMES) as ToolName[])
     .map(
       (tool) =>
         [
           TOOL_NAMES[tool],
-          rows.filter((row) => row.kind === "worktree" && row.tool === tool).length,
+          rows.filter((row) => row.kind !== "branch" && row.tool === tool).length,
         ] as const,
     )
     .filter(([, count]) => count)
@@ -113,12 +114,21 @@ const VERDICT_COLUMNS = [
   countColumn("Review", "REVIEW"),
   countColumn("Busy", "BUSY"),
   countColumn("Broken", "BROKEN"),
+  countColumn("Orphaned", "ORPHANED"),
+];
+const SHORT_VERDICT_COLUMNS = [
+  countColumn("Safe", "SAFE"),
+  countColumn("Review", "REV"),
+  countColumn("Busy", "BUSY"),
+  countColumn("Broken", "BRK"),
+  countColumn("Orphaned", "ORPH"),
 ];
 
 function projectColumns(width: number): ProjectColumn[] {
   const [safe, review] = VERDICT_COLUMNS;
   const options: ProjectColumn[][] = [
     [WORKTREES_COLUMN, ...VERDICT_COLUMNS, SAFE_SIZE_COLUMN, TOTAL_COLUMN],
+    [WORKTREES_COLUMN, ...SHORT_VERDICT_COLUMNS, SAFE_SIZE_COLUMN, TOTAL_COLUMN],
     [WORKTREES_COLUMN, safe!, review!, SAFE_SIZE_COLUMN, TOTAL_COLUMN],
     [WORKTREES_COLUMN, safe!, SAFE_SIZE_COLUMN],
     [SAFE_SIZE_COLUMN],
@@ -211,7 +221,7 @@ export function renderProjects(state: UiState, ctx: RenderContext, viewport: Vie
   const cols = projectColumns(width);
   const rows = visibleRows(state, ctx.snapshot);
   const top: Line[] = [
-    headerLine(state, ctx, state.screen, rows, view.projects.length),
+    headerLine(state, ctx, state.screen, rows, repoCount(view)),
     meterLine(projectsReady(state, ctx.snapshot) ? rows : [], ctx),
     [
       cell("  PROJECT", width - cols.reduce((sum, col) => sum + col.width, 0), { dim: true }),
@@ -236,14 +246,22 @@ export function renderProjects(state: UiState, ctx: RenderContext, viewport: Vie
   ];
 }
 
+/** What the orphans' pseudo-project holds, in place of a repository path: "3 folders no repo knows". */
+export function orphansLabel(project: Project): string {
+  return `${countLabel(project.worktrees, "folder")} no repo knows`;
+}
+
 function projectDetails(view: ProjectsView, ctx: RenderContext, width: number): Line[] {
   const { theme, now, home } = ctx;
   const project = view.focus;
   if (!project) return [];
+  const orphans = project.repoPath === ORPHANS;
   const where =
     project.repoPath === ALL_PROJECTS
-      ? countLabel(view.projects.length, "project")
-      : homePath(project.repoPath, home);
+      ? countLabel(repoCount(view), "project")
+      : orphans
+        ? orphansLabel(project)
+        : homePath(project.repoPath, home);
   const lines: Line[] = [
     [
       seg(project.repoName, { bold: true }),
@@ -274,19 +292,23 @@ function projectDetails(view: ProjectsView, ctx: RenderContext, width: number): 
     null,
   );
   const sizing = project.unsized ? ` · ${project.unsized} sizing` : "";
+  if (orphans) lines.push(...field("SIZE", `up to ${sizeLabel(project.totalKiB)}${sizing}`, width));
+  else
+    lines.push(
+      ...field(
+        "SAFE TO FREE",
+        `${sizeLabel(project.safeKiB)} of ${sizeLabel(project.totalKiB)}${sizing}`,
+        width,
+        { fg: theme.safe },
+      ),
+      ...field(
+        "UNCOMMITTED",
+        dirty ? countLabel(dirty, "worktree") : "none",
+        width,
+        dirty ? { fg: theme.review } : { fg: theme.safe },
+      ),
+    );
   lines.push(
-    ...field(
-      "SAFE TO FREE",
-      `${sizeLabel(project.safeKiB)} of ${sizeLabel(project.totalKiB)}${sizing}`,
-      width,
-      { fg: theme.safe },
-    ),
-    ...field(
-      "UNCOMMITTED",
-      dirty ? countLabel(dirty, "worktree") : "none",
-      width,
-      dirty ? { fg: theme.review } : { fg: theme.safe },
-    ),
     ...field("MADE BY", tools.map(([tool, count]) => `${tool} ${count}`).join(" · "), width),
   );
   if (oldest)

@@ -124,16 +124,16 @@ for (const width of WIDTHS) {
           expect(frame).toContain("→ worktrees  a select safe  / search");
         } else {
           expect(squeeze(lineWith(frame, "PROJECT")).trim()).toBe(
-            "PROJECT WORKTREES SAFE REVIEW BUSY BROKEN SAFE SIZE TOTAL",
+            "PROJECT WORKTREES SAFE REV BUSY BRK ORPH SAFE SIZE TOTAL",
           );
           expect(projectRow(frame, "All projects", width)).toBe(
-            `All projects 7 4 3 1 1 ${sizeLabel(alphaSafe + betaKiB)} ${sizeLabel(alphaTotal + betaKiB)}`,
+            `All projects 7 4 3 1 1 · ${sizeLabel(alphaSafe + betaKiB)} ${sizeLabel(alphaTotal + betaKiB)}`,
           );
           expect(projectRow(frame, "alpha", width)).toBe(
-            `▌ alpha 6 3 3 1 1 ${sizeLabel(alphaSafe)} ${sizeLabel(alphaTotal)}`,
+            `▌ alpha 6 3 3 1 1 · ${sizeLabel(alphaSafe)} ${sizeLabel(alphaTotal)}`,
           );
           expect(projectRow(frame, "beta", width)).toBe(
-            `beta 1 1 · · · ${sizeLabel(betaKiB)} ${sizeLabel(betaKiB)}`,
+            `beta 1 1 · · · · ${sizeLabel(betaKiB)} ${sizeLabel(betaKiB)}`,
           );
           expect(frame).toContain(
             `SAFE TO FREE  ${sizeLabel(alphaSafe)} of ${sizeLabel(alphaTotal)}`,
@@ -148,7 +148,7 @@ for (const width of WIDTHS) {
           `wt-dash › alpha ${width >= 100 ? "6 worktrees and 2 branches · " : ""}up to ${sizeLabel(alphaTotal)} · `,
         );
         expect(squeeze(lineWith(frame, "All 8"))).toContain(
-          "All 8 Safe 3 Review 3 Busy 1 Broken 1 / search",
+          "All 8 Safe 3 Review 3 Busy 1 Broken 1 Orphaned 0 / search",
         );
         for (const built of Object.values(alpha)) {
           if (built.expected.verdict === "Broken") continue;
@@ -202,7 +202,7 @@ for (const width of WIDTHS) {
         await app.type("squash");
         frame = await app.waitFor((text) => names(text).join() === "squashed");
         expect(squeeze(listPart(lineWith(frame, "All 1"))).trim()).toBe(
-          "All 1 Safe 1 Review 0 Busy 0 Broken 0 / squash 1 of 9",
+          "All 1 Safe 1 Review 0 Busy 0 Broken 0 Orphaned 0 / squash 1 of 9",
         );
         await app.press("enter");
         frame = await app.waitFor("esc clears");

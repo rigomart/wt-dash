@@ -21,7 +21,7 @@ import type { Theme } from "../theme";
 import { dim, key } from "./common";
 import type { RenderContext } from "./layout";
 import { toastLine } from "./chrome";
-import { rowSize } from "./list";
+import { repoCell, rowSize } from "./list";
 
 function names(entries: RemovalEntry[]): string {
   const labels = entries.map((entry) => branchLabel(entry.row));
@@ -120,11 +120,20 @@ function removeDialog(
       ),
     );
   }
+  const orphans = ready.filter((entry) => entry.row.kind === "orphan");
   if (!dirty.length && !blocked.length && ready.some((entry) => entry.row.kind === "worktree"))
     notes.push(
-      ...wrap("Nothing uncommitted. Ignored files and caches go with them.", inner).map((text) => [
-        dim(text),
-      ]),
+      ...wrap(
+        `Nothing uncommitted${orphans.length ? " in the worktrees" : ""}. Ignored files and caches go with them.`,
+        inner,
+      ).map((text) => [dim(text)]),
+    );
+  if (orphans.length)
+    notes.push(
+      ...wrap(
+        `No repository tracks ${names(orphans)}, so wt-dash deletes ${orphans.length === 1 ? "it" : "them"} itself, unchecked, with everything inside.`,
+        inner,
+      ).map((text) => [dim(text)]),
     );
   const unmerged = ready.filter((entry) => entry.branchWillBeRetained);
   const merged = ready.filter((entry) => entry.row.branch !== null && !entry.branchWillBeRetained);
@@ -142,14 +151,16 @@ function removeDialog(
       dim(confirm.deleteUnmerged ? " keep them" : " delete too"),
     ]);
   } else if (merged.length) options.push([dim("Merged branches are deleted.")]);
-  options.push([
-    confirm.reap
-      ? dim("Stops processes running inside  ")
-      : seg("Processes inside keep running  ", { fg: theme.review }),
-    key(theme, "e"),
-    dim(confirm.reap ? " leave them" : " stop them"),
-  ]);
-  const tail: Line[] = [[], ...notes, [], ...options, []];
+  const hasProcessesToStop = orphans.length < ready.length;
+  if (hasProcessesToStop)
+    options.push([
+      confirm.reap
+        ? dim("Stops processes running inside  ")
+        : seg("Processes inside keep running  ", { fg: theme.review }),
+      key(theme, "e"),
+      dim(confirm.reap ? " leave them" : " stop them"),
+    ]);
+  const tail: Line[] = [[], ...notes, ...(options.length ? [[], ...options] : []), []];
   const room = Math.max(1, ctx.height - 3 - tail.length);
   const shown = sized.length > room ? sized.slice(0, room - 1) : sized;
   const sizeWidth = 9;
@@ -160,7 +171,7 @@ function removeDialog(
       inner - repoWidth - sizeWidth,
       entry.requiresDiscard ? { fg: theme.review } : {},
     ),
-    cell(entry.row.repoName, repoWidth, { dim: true }),
+    cell(repoCell(entry.row), repoWidth, { dim: true }),
     cell(rowSize(entry.row), sizeWidth, { dim: true }, "right"),
   ]);
   if (shown.length < ready.length) rows.push([dim(`  +${ready.length - shown.length} more`)]);

@@ -43,6 +43,8 @@ export interface LinkedWorktrees {
   count: number;
   /** Folders of the worktrees whose `gitdir` record could be read. */
   paths: string[];
+  /** Names of the records whose `gitdir` could not be read. */
+  unread: string[];
 }
 
 /** Read the linked worktrees Git records in `.git/worktrees`, without running Git. */
@@ -53,17 +55,24 @@ export async function readLinkedWorktrees(repo: string): Promise<LinkedWorktrees
     const entries = await readdir(records, { withFileTypes: true });
     names = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? { count: 0, paths: [] } : null;
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { count: 0, paths: [], unread: [] }
+      : null;
   }
   const paths = await Promise.all(
     names.map((name) =>
       readFile(join(records, name, "gitdir"), "utf8").then(
-        (gitdir) => dirname(gitdir.trim()),
+        // Git writes a relative path, against the record's folder, under worktree.useRelativePaths.
+        (gitdir) => dirname(resolve(join(records, name), gitdir.trim())),
         () => null,
       ),
     ),
   );
-  return { count: names.length, paths: paths.filter((path) => path !== null) };
+  return {
+    count: names.length,
+    paths: paths.filter((path) => path !== null),
+    unread: names.filter((_, index) => paths[index] === null),
+  };
 }
 
 /**

@@ -20,6 +20,9 @@ function statusFiles(stdout: string): FileReport {
 
 export async function readFiles(row: WorktreeRow, runner: CommandRunner): Promise<FileReport> {
   if (row.path === null) throw new Error("A branch without a worktree has no files");
+  // Git run inside an orphan can walk up into a repository above it and report that one's files.
+  if (row.kind === "orphan")
+    throw new Error("Git can't inspect an orphaned folder, because no repository knows it");
   const status = await runner("git", [
     "-C",
     row.path,

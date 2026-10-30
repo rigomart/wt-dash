@@ -1,4 +1,4 @@
-import type { WorktreeRow } from "../../core/types";
+import { ORPHANS, type WorktreeRow } from "../../core/types";
 import { agoLabel, branchLabel, changesLabel, countLabel, homePath, sizeLabel } from "../format";
 import {
   cell,
@@ -17,6 +17,7 @@ import {
   listView,
   projectsReady,
   projectsView,
+  repoCount,
   scopedRows,
   worktreeCount,
   type ProjectsView,
@@ -26,7 +27,7 @@ import { dim, spinner } from "./common";
 import { bodyHeightFor, pad, sidebarWidth, type RenderContext, type Viewport } from "./layout";
 import { headerLine, listFooter, meterLine, statusLine } from "./chrome";
 import { listColumn } from "./list";
-import { SIDEBAR_FREE, scanProgress, toolCounts } from "./projects";
+import { SIDEBAR_FREE, orphansLabel, scanProgress, toolCounts } from "./projects";
 
 export function renderSidebar(state: UiState, ctx: RenderContext, viewport: Viewport): Line[] {
   const { width, snapshot } = ctx;
@@ -51,7 +52,7 @@ export function renderSidebar(state: UiState, ctx: RenderContext, viewport: View
           ctx,
           scope,
           scopedRows(state, snapshot),
-          scope.kind === "all" ? projects.projects.length : undefined,
+          scope.kind === "all" ? repoCount(projects) : undefined,
         ),
     ...sidebar.map((line, index) => [
       ...fitLine(line, side),
@@ -84,9 +85,10 @@ function sidebarLines(
     const count = String(worktreeCount(project) || (project.pending ? "…" : 0));
     const selected = project.rows.filter((row) => state.selected.has(row.id)).length;
     const mark = selected ? ` ■${selected}` : "";
+    const freeColumnWidth = project.repoPath === ORPHANS ? 0 : SIDEBAR_FREE.width;
     const nameWidth = Math.max(
       1,
-      width - 2 - SIDEBAR_FREE.width - textWidth(count) - textWidth(mark) - 1,
+      width - 2 - freeColumnWidth - textWidth(count) - textWidth(mark) - 1,
     );
     const name = middle(project.repoName, nameWidth);
     const parts: Line = [
@@ -95,12 +97,13 @@ function sidebarLines(
       dim(` ${count}`),
       seg(mark, { fg: theme.safe }),
     ];
-    parts.push(seg(" ".repeat(Math.max(0, width - SIDEBAR_FREE.width - lineWidth(parts)))));
-    parts.push(
-      project.error && !project.rows.length
-        ? cell("! failed", SIDEBAR_FREE.width, { fg: theme.review }, "right")
-        : SIDEBAR_FREE.cell(project, ctx),
-    );
+    parts.push(seg(" ".repeat(Math.max(0, width - freeColumnWidth - lineWidth(parts)))));
+    if (freeColumnWidth)
+      parts.push(
+        project.error && !project.rows.length
+          ? cell("! failed", freeColumnWidth, { fg: theme.review }, "right")
+          : SIDEBAR_FREE.cell(project, ctx),
+      );
     return fitLine(parts, width, focused && active ? { bg: theme.focusBg } : undefined);
   });
   const card =
@@ -129,13 +132,16 @@ function projectCard(
   const project = view.focus;
   if (!project) return [];
   const all = project.repoPath === ALL_PROJECTS;
+  const orphans = project.repoPath === ORPHANS;
   const lines: Line[] = [
     [seg(clip(project.repoName, width), { bold: true })],
     [
       dim(
         all
-          ? countLabel(view.projects.length, "project")
-          : middle(homePath(project.repoPath, home), width),
+          ? countLabel(repoCount(view), "project")
+          : orphans
+            ? clip(orphansLabel(project), width)
+            : middle(homePath(project.repoPath, home), width),
       ),
     ],
   ];
@@ -173,16 +179,22 @@ function projectCard(
     const room = Math.max(1, width - label.length - value.length - 3);
     return [dim(label), seg(value), dim(" · "), dim(middle(branchLabel(row), room))];
   };
-  lines.push(
-    [
-      seg(`${sizeLabel(project.safeKiB)} safe`, { fg: theme.safe }),
-      dim(clip(` of ${sizeLabel(project.totalKiB)}`, width)),
-    ],
-    dirty
-      ? [seg(`${countLabel(dirty, "worktree")} uncommitted`, { fg: theme.review })]
-      : [seg("nothing uncommitted", { fg: theme.safe })],
-    [dim(clip(tools.map(([tool, count]) => `${tool} ${count}`).join(" · "), width))],
-  );
+  if (orphans)
+    lines.push([
+      seg(`up to ${sizeLabel(project.totalKiB)}`, { fg: theme.orphaned }),
+      dim(project.unsized ? ` · ${project.unsized} sizing` : ""),
+    ]);
+  else
+    lines.push(
+      [
+        seg(`${sizeLabel(project.safeKiB)} safe`, { fg: theme.safe }),
+        dim(clip(` of ${sizeLabel(project.totalKiB)}`, width)),
+      ],
+      dirty
+        ? [seg(`${countLabel(dirty, "worktree")} uncommitted`, { fg: theme.review })]
+        : [seg("nothing uncommitted", { fg: theme.safe })],
+    );
+  lines.push([dim(clip(tools.map(([tool, count]) => `${tool} ${count}`).join(" · "), width))]);
   if (oldest) lines.push(named("oldest  ", agoLabel(oldest.committedAt, now), oldest));
   if (largest && largest.sizeKiB !== null)
     lines.push(named("largest ", sizeLabel(largest.sizeKiB), largest));

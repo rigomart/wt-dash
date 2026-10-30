@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
 import fixture from "../fixtures/list-v2.json";
 import { createDashboardService } from "../../src/core/scan/dashboard";
+import type { LinkedWorktrees } from "../../src/core/scan/discovery";
+import type { Orphan } from "../../src/core/scan/orphans";
 import { isSizing } from "../../src/core/view";
-import type {
-  CommandRunner,
-  DashboardService,
-  DashboardSnapshot,
-  SizeEntry,
-  SizeService,
+import {
+  ORPHANS,
+  type CommandRunner,
+  type DashboardService,
+  type DashboardSnapshot,
+  type SizeEntry,
+  type SizeService,
 } from "../../src/core/types";
 
 const data = JSON.stringify(fixture);
@@ -263,7 +266,7 @@ test("an old refresh cannot overwrite a newer snapshot", async () => {
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/repo"],
-    readLinked: async () => ({ count: 2, paths: [] }),
+    readLinked: async () => ({ count: 2, paths: [], unread: [] }),
     runner: async () => {
       calls++;
       if (calls === 1) {
@@ -420,7 +423,7 @@ test("lists worktrees before branches without a worktree, and measures each work
       },
     },
     discover: async () => ["/repo"],
-    readLinked: async () => ({ count: 2, paths: [] }),
+    readLinked: async () => ({ count: 2, paths: [], unread: [] }),
     runner: async (_command, args) => {
       if (!args.includes("list")) return result("", 1);
       lists.push(args);
@@ -456,7 +459,7 @@ test("lists the first project's worktrees on their own before the other projects
     wtPath: "/wt",
     sizeService,
     discover: async () => ["/big", "/small-1", "/small-2"],
-    readLinked: async (repo) => ({ count: repo === "/big" ? 5 : 1, paths: [] }),
+    readLinked: async (repo) => ({ count: repo === "/big" ? 5 : 1, paths: [], unread: [] }),
     runner: async (_command, args) => {
       if (!args.includes("list") || args.includes("--branches")) return result();
       events.push(`start ${args[1]}`);
@@ -487,7 +490,7 @@ test("a failed worktree listing leaves the repo to its full listing", async () =
       },
     },
     discover: async () => ["/flaky", "/bad"],
-    readLinked: async () => ({ count: 2, paths: [] }),
+    readLinked: async () => ({ count: 2, paths: [], unread: [] }),
     runner: async (_command, args) => {
       if (!args.includes("list")) return result("", 1);
       if (args[1] === "/bad") return result("", 1);
@@ -651,7 +654,7 @@ test("publishes discovered repos with their linked worktree counts before listin
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/one", "/two"],
-    readLinked: async (repo) => ({ count: repo === "/one" ? 3 : 0, paths: [] }),
+    readLinked: async (repo) => ({ count: repo === "/one" ? 3 : 0, paths: [], unread: [] }),
     runner: async () => {
       await gate;
       return result();
@@ -676,7 +679,7 @@ test("a targeted rescan recounts only its repos", async () => {
     wtPath: "/opt/homebrew/bin/wt",
     sizeService,
     discover: async () => ["/one", "/two"],
-    readLinked: async () => ({ count: linked, paths: [] }),
+    readLinked: async () => ({ count: linked, paths: [], unread: [] }),
     runner: async () => result(),
   });
   await service.refresh();
@@ -935,4 +938,144 @@ test("#24: a remeasure started during a scan does not overwrite the size of the 
   } finally {
     await service.close();
   }
+});
+
+const orphan: Orphan = {
+  path: "/home/.codex/worktrees/abcd/app",
+  cause: {
+    kind: "gitdirMissing",
+    gitdir: "/old/app/.git/worktrees/app",
+    repo: "/old/app",
+    repoExists: false,
+  },
+};
+
+test("finds orphans from every repo's records alongside the listing, and sizes them like worktrees", async () => {
+  let releaseList!: () => void;
+  const listing = new Promise<void>((resolve) => {
+    releaseList = resolve;
+  });
+  const searched: Array<Array<{ path: string; linked: LinkedWorktrees | null }>> = [];
+  const measured: string[] = [];
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService: {
+      ...sizeService,
+      get: (path) =>
+        path === orphan.path ? { sizeKiB: 512, measuredAt: "2026-10-01T00:00:00Z" } : null,
+      measureIfStale: async (path) => {
+        measured.push(path);
+        return null;
+      },
+    },
+    discover: async () => ["/one"],
+    readLinked: async () => ({ count: 1, paths: ["/one.feature"], unread: [] }),
+    findOrphans: async (repos) => {
+      searched.push(repos);
+      return [orphan];
+    },
+    runner: async (_command, args) => {
+      if (args.includes("list")) await listing;
+      return result();
+    },
+  });
+  const pending = service.refresh();
+  const early = await waitFor(service, (snapshot) =>
+    snapshot.rows.some((row) => row.kind === "orphan"),
+  );
+  expect(early.progress.phase).toBe("scanning");
+  expect(early.rows.map((row) => row.repoPath)).toEqual([ORPHANS]);
+  expect(early.rows[0]).toMatchObject({
+    id: `${ORPHANS}\0${orphan.path}`,
+    path: orphan.path,
+    orphan: orphan.cause,
+    verdict: "Orphaned",
+    sizeKiB: 512,
+  });
+  expect(searched).toEqual([
+    [{ path: "/one", linked: { count: 1, paths: ["/one.feature"], unread: [] } }],
+  ]);
+  releaseList();
+  await pending;
+  const done = service.getSnapshot();
+  expect(done.progress.phase).toBe("complete");
+  expect(done.rows.filter((row) => row.kind === "orphan")).toHaveLength(1);
+  expect(done.repos.map((repo) => repo.path)).toEqual(["/one"]);
+  expect(measured).toContain(orphan.path);
+  await service.close();
+});
+
+test("a rescan of the orphans group searches again without listing it, and other rescans leave orphans alone", async () => {
+  let found = [orphan];
+  let searches = 0;
+  const listed: string[] = [];
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService,
+    discover: async () => ["/one", "/two"],
+    readLinked: async (repo) => ({ count: 1, paths: [`${repo}.feature`], unread: [] }),
+    findOrphans: async (repos) => {
+      searches++;
+      expect(repos.map((repo) => repo.path)).toEqual(["/one", "/two"]);
+      return found;
+    },
+    runner: async (_command, args) => {
+      if (args.includes("list")) listed.push(args[1]!);
+      return result();
+    },
+  });
+  await service.refresh();
+  listed.length = 0;
+  await service.refresh(["/two"]);
+  expect([searches, listed]).toEqual([1, ["/two", "/two"]]);
+  expect(service.getSnapshot().rows.filter((row) => row.kind === "orphan")).toHaveLength(1);
+
+  found = [];
+  listed.length = 0;
+  await service.refresh([ORPHANS]);
+  let snapshot = service.getSnapshot();
+  expect([searches, listed]).toEqual([2, []]);
+  expect(snapshot.rows.some((row) => row.kind === "orphan")).toBe(false);
+  expect(snapshot.rows).toHaveLength(4);
+  expect(snapshot.errors).toEqual({});
+  expect(snapshot.repos.map((repo) => repo.path)).toEqual(["/one", "/two"]);
+  expect(snapshot.progress.phase).toBe("complete");
+
+  found = [orphan];
+  await service.refresh([ORPHANS, "/one"]);
+  snapshot = service.getSnapshot();
+  expect([searches, listed]).toEqual([3, ["/one", "/one"]]);
+  expect(snapshot.rows.filter((row) => row.kind === "orphan")).toHaveLength(1);
+  expect(snapshot.errors).toEqual({});
+  await service.close();
+});
+
+test("a failed orphan search drops orphan rows at the end of a full scan and records no error", async () => {
+  let fail = false;
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    sizeService,
+    discover: async () => ["/one"],
+    findOrphans: async () => {
+      if (fail) throw new Error("unreadable");
+      return [orphan];
+    },
+    runner: async () => result(),
+  });
+  await service.refresh();
+  expect(service.getSnapshot().rows.some((row) => row.kind === "orphan")).toBe(true);
+  fail = true;
+  await service.refresh();
+  const snapshot = service.getSnapshot();
+  expect(snapshot.rows.some((row) => row.kind === "orphan")).toBe(false);
+  expect(snapshot.rows).toHaveLength(2);
+  expect([snapshot.errors, snapshot.fatalError, snapshot.progress.phase]).toEqual([
+    {},
+    null,
+    "complete",
+  ]);
+  await service.close();
 });

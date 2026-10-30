@@ -2,13 +2,15 @@ import { listArgs, parseWorktrunk, SchemaMismatchError } from "../worktrunk/list
 import { discoverRepos, readLinkedWorktrees, type LinkedWorktrees } from "./discovery";
 import { enrichRows } from "./enrich";
 import { listingOrder } from "./order";
-import type {
-  CommandRunner,
-  DashboardService,
-  DashboardSnapshot,
-  SizeEntry,
-  SizeService,
-  WorktreeRow,
+import { orphanRow, type Orphan } from "./orphans";
+import {
+  ORPHANS,
+  type CommandRunner,
+  type DashboardService,
+  type DashboardSnapshot,
+  type SizeEntry,
+  type SizeService,
+  type WorktreeRow,
 } from "../types";
 
 interface DashboardOptions {
@@ -20,6 +22,10 @@ interface DashboardOptions {
   readLinked?: (repo: string) => Promise<LinkedWorktrees | null>;
   readCreated?: (worktree: string) => Promise<string | null>;
   readBranchCreated?: (repo: string, branch: string) => Promise<string | null>;
+  /** Looks for orphan folders once the repos are known; without it there are no orphan rows. */
+  findOrphans?: (
+    repos: Array<{ path: string; linked: LinkedWorktrees | null }>,
+  ) => Promise<Orphan[]>;
 }
 
 export function createDashboardService(options: DashboardOptions): DashboardService {
@@ -133,7 +139,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
       let repos: string[];
       try {
         repos = targeted
-          ? [...targeted]
+          ? [...targeted].filter((repo) => repo !== ORPHANS)
           : await (options.discover ?? discoverRepos)(options.projectRoot, 3);
       } catch (error) {
         if (current(scanGeneration)) {
@@ -167,6 +173,30 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
           : found,
         progress: { ...snapshot.progress, reposTotal: repos.length },
       });
+      async function scanOrphans(
+        find: NonNullable<DashboardOptions["findOrphans"]>,
+      ): Promise<void> {
+        const recordsOfEveryRepo = await Promise.all(
+          snapshot.repos.map(async ({ path }) => ({
+            path,
+            linked: linkedByPath.has(path)
+              ? (linkedByPath.get(path) ?? null)
+              : await (options.readLinked ?? readLinkedWorktrees)(path),
+          })),
+        );
+        const rows = withSizes((await find(recordsOfEveryRepo)).map(orphanRow));
+        if (!current(scanGeneration)) return;
+        scanned.add(ORPHANS);
+        scheduleSizes(rows, false);
+        publish({
+          ...snapshot,
+          rows: [...snapshot.rows.filter((row) => row.repoPath !== ORPHANS), ...rows],
+        });
+      }
+      const orphansScanned =
+        options.findOrphans && (!targeted || targeted.has(ORPHANS))
+          ? scanOrphans(options.findOrphans).catch(() => {})
+          : null;
       // Branches without a worktree take most of a cold `wt list`; the full listing reuses what this one cached.
       const sized = new Set<string>();
       const quickRepos = order.filter((repo) => linkedByPath.get(repo)?.count !== 0);
@@ -291,6 +321,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         }
       }
       await Promise.all(Array.from({ length: Math.min(4, repos.length) }, () => worker()));
+      await orphansScanned;
       if (current(scanGeneration)) {
         publish({
           ...snapshot,

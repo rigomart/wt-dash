@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { beta, context, openedWorktreeList, press, row } from "./support/update";
-import { listView, projectsView } from "../src/ui/selectors";
+import { beta, context, openedWorktreeList, orphan, press, row } from "./support/update";
+import { listView, projectsView, repoCount, soleProject } from "../src/ui/selectors";
+import { ORPHANS } from "../src/core/types";
 import { initialState } from "../src/ui/state";
 
 test("rows follow verdict sections, or repos with Safe rows first when grouped", () => {
@@ -92,4 +93,55 @@ test("branches without a worktree are selectable but not counted as worktrees or
   expect(state.toast?.text).toBe("Selected 1 Safe worktree and 1 branch · up to 10 KB");
   state = press(state, ctx, "j", "R");
   expect(state.toast?.text).toBe("A branch without a worktree has no folder to measure");
+});
+
+test("orphans form a pseudo-project after every repository, counted in All projects but not as a project", () => {
+  const ctx = context([
+    row("a", 10),
+    beta("b", 20),
+    beta("c", 30, { verdict: "Review", mainState: "ahead" }),
+    orphan("x", 100),
+    orphan("y", 200),
+    orphan("z", 300),
+  ]);
+  const view = projectsView(initialState(), ctx.snapshot);
+  expect(view.entries.map((project) => project.repoName)).toEqual([
+    "All projects",
+    "beta",
+    "alpha",
+    "Orphaned folders",
+  ]);
+  expect(repoCount(view)).toBe(2);
+  const orphans = view.projects.at(-1)!;
+  expect(orphans).toMatchObject({ repoPath: ORPHANS, worktrees: 3, totalKiB: 600, safeKiB: 0 });
+  expect(orphans.counts).toEqual({ Safe: 0, Review: 0, Busy: 0, Broken: 0, Orphaned: 3 });
+  expect(view.entries[0]!.counts.Orphaned).toBe(3);
+  expect(view.entries[0]).toMatchObject({ worktrees: 6, totalKiB: 660 });
+});
+
+test("orphans get the last tab and the last section, or the last group by repo", () => {
+  const ctx = context([row("a", 10), beta("b", 20), orphan("x", 999)]);
+  let state = openedWorktreeList(ctx);
+  expect(state.screen).toEqual({ kind: "all" });
+  let view = listView(state, ctx.snapshot);
+  expect(view.counts).toEqual({ All: 3, Safe: 2, Review: 0, Busy: 0, Broken: 0, Orphaned: 1 });
+  expect(view.sections.map((section) => section.kind === "verdict" && section.verdict)).toEqual([
+    "Safe",
+    "Orphaned",
+  ]);
+  state = press(state, ctx, "v");
+  view = listView(state, ctx.snapshot);
+  expect(view.sections.map((section) => section.kind === "repo" && section.repoName)).toEqual([
+    "beta",
+    "alpha",
+    "Orphaned folders",
+  ]);
+});
+
+test("orphans don't count as a project when deciding whether to open the only one", () => {
+  const ctx = context([row("a", 10), orphan("x", 10)]);
+  expect(soleProject(ctx.snapshot)).toBe("/repos/alpha");
+  const repos = { ...ctx.snapshot, repos: [{ path: "/repos/alpha", linked: 1 }] };
+  expect(soleProject(repos)).toBe("/repos/alpha");
+  expect(soleProject(context([orphan("x", 10)]).snapshot)).toBeNull();
 });

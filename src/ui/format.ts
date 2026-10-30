@@ -45,7 +45,12 @@ export function clockLabel(iso: string | null): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+/** An orphan is named by its folder, with the folder above unless that is the agent's `worktrees` folder: `abcd/app`. */
 export function branchLabel(row: WorktreeRow): string {
+  if (row.kind === "orphan" && row.path) {
+    const [parent, folder] = row.path.split("/").slice(-2);
+    return parent && parent !== "worktrees" ? `${parent}/${folder}` : folder || row.path;
+  }
   if (row.branch) return row.branch;
   return row.headSha ? `detached @${row.headSha.slice(0, 7)}` : "detached";
 }
@@ -54,6 +59,14 @@ export function homePath(path: string, home: string): string {
   return home && (path === home || path.startsWith(home + "/"))
     ? "~" + path.slice(home.length)
     : path;
+}
+
+/** Shortens each path under `home` in a sentence, such as an orphan's reason, to start with `~`. */
+export function homeText(text: string, home: string): string {
+  return text
+    .split(" ")
+    .map((word) => homePath(word, home))
+    .join(" ");
 }
 
 /** Display the single Git status, shortened only when the column cannot fit it. */
@@ -138,12 +151,27 @@ export function countLabel(count: number, singular: string, plural = `${singular
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-/** "3 worktrees", "1 branch", or "2 Safe worktrees and 1 branch", counting branches without a worktree apart. */
+const ROW_KINDS: Array<[WorktreeRow["kind"], string, string]> = [
+  ["worktree", "worktree", "worktrees"],
+  ["branch", "branch", "branches"],
+  ["orphan", "orphaned folder", "orphaned folders"],
+];
+
+/**
+ * "3 worktrees", "1 branch", "2 Safe worktrees and 1 branch", or "2 worktrees, 1 branch and 1 orphaned folder",
+ * counting branches without a worktree and orphans apart. The adjective goes on the first kind only.
+ */
 export function rowsLabel(rows: WorktreeRow[], adjective = ""): string {
-  const branches = rows.filter((row) => row.kind === "branch").length;
-  const worktrees = rows.length - branches;
-  const kind = adjective ? `${adjective} ` : "";
-  if (!branches) return countLabel(worktrees, `${kind}worktree`);
-  if (!worktrees) return countLabel(branches, `${kind}branch`, `${kind}branches`);
-  return `${countLabel(worktrees, `${kind}worktree`)} and ${countLabel(branches, "branch", "branches")}`;
+  const parts = ROW_KINDS.map(([kind, singular, plural]) => {
+    const count = rows.filter((row) => row.kind === kind).length;
+    return { count, singular, plural };
+  }).filter((part) => part.count);
+  if (!parts.length) return countLabel(0, `${adjective ? `${adjective} ` : ""}worktree`);
+  const labels = parts.map(({ count, singular, plural }, index) => {
+    const kind = index === 0 && adjective ? `${adjective} ` : "";
+    return countLabel(count, `${kind}${singular}`, `${kind}${plural}`);
+  });
+  return labels.length === 1
+    ? labels[0]!
+    : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }

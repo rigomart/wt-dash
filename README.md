@@ -6,7 +6,7 @@ Coding agents create worktrees constantly. Claude Code keeps them in `.claude/wo
 
 wt-dash scans your repositories, lists every linked worktree with its size and Git state, along with local branches left behind without a worktree, and sorts them by how safe they are to delete. Select what you want gone, confirm once, and the removal runs in the background while you keep working.
 
-It is built on [Worktrunk](https://worktrunk.dev/): Worktrunk computes the Git facts and performs every removal.
+It is built on [Worktrunk](https://worktrunk.dev/): Worktrunk computes the Git facts and removes every worktree a repository knows. Orphaned folders, which no repository knows, wt-dash deletes itself.
 
 ## Install
 
@@ -58,19 +58,30 @@ wt-dash looks for repositories up to two folder levels below each folder you giv
 
 ## Verdicts
 
-Every worktree gets one of four verdicts. The list groups them into sections, and each row shows its Git status and the reason behind it.
+Every worktree gets one of five verdicts. The list groups them into sections, and each row shows its Git status and the reason behind it.
 
-| Verdict    | Status                                                                                                                                                       | Removal                            |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
-| **Safe**   | no new commits, merged                                                                                                                                       | Allowed                            |
-| **Review** | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history; no new commits, under a day old; an agent marked it in the last day | Allowed after you read the warning |
-| **Review** | locked, status unknown                                                                                                                                       | Blocked                            |
-| **Busy**   | rebase, merge, or cherry-pick in progress; unresolved conflicts                                                                                              | Blocked                            |
-| **Broken** | folder missing                                                                                                                                               | Offers to prune Git's record       |
+| Verdict      | Status                                                                                                                                                       | Removal                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| **Safe**     | no new commits, merged                                                                                                                                       | Allowed                             |
+| **Review**   | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history; no new commits, under a day old; an agent marked it in the last day | Allowed after you read the warning  |
+| **Review**   | locked, status unknown                                                                                                                                       | Blocked                             |
+| **Busy**     | rebase, merge, or cherry-pick in progress; unresolved conflicts                                                                                              | Blocked                             |
+| **Broken**   | folder missing                                                                                                                                               | Offers to prune Git's record        |
+| **Orphaned** | repository gone, unknown to its repo, Git record gone; no worktree inside                                                                                    | Allowed; wt-dash deletes the folder |
 
 **Safe** means Worktrunk reports clean content already integrated into, or identical to, the default branch. A branch with nothing beyond the default branch, either the same commit or one the default branch has since moved past, looks that way the moment its worktree is created. So, like `wt step prune`, wt-dash calls such a worktree Safe only once it is a day old. Until then it is Review, with a reason such as "Created 2h ago, so it may still be in use", and `a` leaves it out. Its age comes from when Git created its folder under `.git/worktrees`; if that can't be read, it stays Review. A branch whose own commits reached the default branch through a squash or rebase merge is Safe at any age. A lock always blocks removal, however old; unlock it yourself with `git worktree unlock` if it is stale.
 
 wt-dash does not check pull request status or running processes. It does read agent marks: Worktrunk's agent plugins, such as the one `wt config plugins claude install` adds, mark a branch 🤖 while an agent works in it and 💬 while it waits for input, and clear the mark when the session ends. A worktree that would be Safe but carries a mark set in the last day is Review instead, with a reason such as "An agent was working here 20m ago", so `a` leaves it out; you can still remove it. A mark whose time can't be read counts as recent. An older mark is probably left over from a session that didn't end cleanly, so it only shows in the details, as "Agent mark from 28d ago, likely stale". Marks belong to a branch name, so renaming a branch drops its mark.
+
+### Orphaned folders
+
+Git and Worktrunk find a worktree only through its repository, so a worktree folder whose link to its repository broke is invisible to both. wt-dash looks for these in the folders coding agents keep worktrees in: `.claude/worktrees` inside each scanned repository, `~/.codex/worktrees`, and t3's `~/.t3/worktrees` and `~/.t3-lines/lines/worktrees`. It lists them under an "Orphaned folders" entry, last on the projects screen and in "All projects", with their size and why no repository knows them:
+
+- The repository was deleted or moved: "Its repository at ~/old/app no longer exists."
+- The repository is still there but no longer records the worktree, for example after a re-clone or a prune: "Its repository at ~/code/app no longer lists it."
+- A Codex folder (`~/.codex/worktrees/<id>`) holding only its `.codex-worktree-name` file, left behind when its worktree was removed.
+
+A worktree whose link to its repository still works is never listed, wherever that repository lives. Moving a repository breaks that link but keeps its record of the worktree: if the repository is in a scan folder, its worktrees are not listed, and `git worktree repair` run in it fixes them; if it lives elsewhere, wt-dash can't see the record and lists them as orphaned. When a scanned repository's records can't be read, the folders they might hold are left out rather than offered for deletion. Rows are named by their folder and the one above it, such as `abcd/app` for `~/.codex/worktrees/abcd/app`. `a` selects Safe rows only, so it leaves orphaned folders out.
 
 ### Branches without a worktree
 
@@ -121,7 +132,7 @@ In a worktree list:
 | Key        | Action                                                                      |
 | ---------- | --------------------------------------------------------------------------- |
 | ↑/↓ or j/k | Move                                                                        |
-| 1–5        | Show all, Safe, Review, Busy, or Broken                                     |
+| 1–6        | Show all, Safe, Review, Busy, Broken, or Orphaned                           |
 | ← or Tab   | Back to the projects                                                        |
 | [ / ]      | Previous / next project                                                     |
 | /          | Search by repo, branch, tool, or path                                       |
@@ -145,6 +156,7 @@ Enter opens one confirmation dialog. It lists each worktree and its size, the to
 - **Ignored files go with the worktree.** That includes `.env` copies, local databases, and caches, the same way Worktrunk treats them.
 - **Every removal is checked again** just before it runs: if its Git status, commit, or lock changed since you confirmed, it was created again at the same path, a rebase or merge is in progress, or an agent marked it since the preview, it is skipped and comes back with a note. A branch without a worktree is skipped if it moved, was deleted, or now has a worktree, or if a worktree folder has the same name as the branch, because Worktrunk would remove that worktree instead. Whether its branch is merged is checked again when that repository's removals start, and again for that worktree if its default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
 - **Worktrunk hooks are skipped.** Project-defined cleanup commands do not run.
+- **Orphaned folders are deleted by wt-dash**, because Worktrunk can't remove a folder no repository knows. Just before, it checks that the folder is still the one you confirmed and is still orphaned for the same reason, and skips it otherwise. The dialog does not check the files inside an orphaned folder; they go with it. Processes running inside are not stopped. Deleting a Codex worktree also deletes its `<id>` folder when nothing but the name file is left.
 
 Removals run in the background, and you can queue more while one is going. Each attempt is logged to `~/.cache/wt-dash/removals.log`.
 
