@@ -1,6 +1,6 @@
-# wt-dash
+# <img src="site/favicon.svg" width="32" height="32" alt="" align="top" /> wt-dash
 
-A terminal dashboard for finding and removing the Git worktrees you no longer need, across every repository on your Mac or Linux machine.
+A terminal dashboard for finding and removing the Git worktrees you no longer need, across every repository on your Mac or Linux machine. [wt-dash.rigos.dev](https://wt-dash.rigos.dev)
 
 ![wt-dash listing 19 worktrees, 3 leftover branches and 3 orphaned folders across four projects, grouped into Safe, Review and Busy](docs/images/projects.png)
 
