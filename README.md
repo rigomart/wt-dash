@@ -12,7 +12,7 @@ Coding agents such as Claude Code, Codex, Cursor and t3 create a worktree for ea
 brew install rigomart/tap/wt-dash
 ```
 
-This installs [Worktrunk](https://worktrunk.dev/) too. wt-dash needs Git and Worktrunk 0.80.0 or newer, and runs on macOS 13 or newer (Apple Silicon and Intel) and on Linux with glibc (arm64 and x64). Alpine and other musl-based distributions are not supported; `ldd --version` prints "GNU libc" on a glibc system. Where Homebrew has no prebuilt Worktrunk, which includes Intel Macs and Linux, it compiles Worktrunk from source, which takes a few minutes.
+This installs [Worktrunk](https://worktrunk.dev/) too. wt-dash needs Git and Worktrunk 0.80.0 or newer, and runs on macOS 13 or newer (Apple Silicon and Intel) and on Linux with glibc (arm64 and x64). Alpine and other musl-based distributions are not supported. On a glibc system, `ldd --version` prints "GNU libc". On Intel Macs and Linux, and anywhere else Homebrew has no prebuilt Worktrunk, Homebrew compiles Worktrunk from source, which takes a few minutes.
 
 To install without Homebrew, download the archive for your system from the [latest release](https://github.com/rigomart/wt-dash/releases/latest) and put the `wt-dash` executable in a folder on your PATH. The macOS binary is not signed or notarized, so macOS blocks a copy downloaded with a browser until you allow it under System Settings → Privacy & Security.
 
@@ -44,7 +44,7 @@ If your shell can't find `wt-dash`, add `~/.local/bin` to your PATH.
 
    With no folders, wt-dash scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, and follows the worktrees in coding agents' folders, such as `~/.codex/worktrees`, back to their repositories. To scan somewhere else, name the folders: `wt-dash ~/repos`. wt-dash remembers every repository it finds, so later runs without folders list those too. `wt-dash --doctor` shows what it finds without opening the dashboard.
 
-2. **Read the verdicts.** Each worktree, and each local branch left without one, gets a verdict, with its Git status and the reason next to it. The strip under the list describes the focused row.
+2. **Read the verdicts.** Each worktree gets a verdict, and so does each local branch left without a worktree. Its Git status and the reason for the verdict sit next to it. The strip under the list describes the focused row.
 
    ![The storefront project's list: Safe, Review and Busy sections, with the details of a Codex worktree in a strip below](docs/images/worktree-list.png)
 
@@ -56,7 +56,7 @@ If your shell can't find `wt-dash`, add `~/.local/bin` to your PATH.
    | **Broken**   | Its folder is gone but Git still lists it. wt-dash offers to prune the record.                         |
    | **Orphaned** | A worktree folder that no repository knows about any more.                                             |
 
-3. **Select and remove.** Press `enter` to open a project, or "All projects". Press `a` to select every Safe row, or `space` to pick rows one at a time, then `enter`. From the projects, `a` then `x` does the same for the focused project. The dialog lists what goes, how much space it frees, and what would be lost. Press `y` or `enter` to remove, `esc` to cancel.
+3. **Select and remove.** Press `enter` to open a project, or "All projects". Press `a` to select every Safe row, or `space` to pick rows one at a time, then `enter`. On the projects screen, `a` then `x` does the same for the focused project. The dialog lists what goes, how much space it frees, and what would be lost. Press `y` or `enter` to remove, `esc` to cancel.
 
    ![The remove dialog for 4 worktrees and 1 branch, warning about uncommitted changes and an ignored .env.local file](docs/images/remove-dialog.png)
 
@@ -145,7 +145,7 @@ A blocked row says what to do next, for example "finish or abort the rebase firs
 <details>
 <summary>When a worktree counts as Safe</summary>
 
-Safe means Worktrunk reports clean content that is already in the default branch, or identical to it. A new worktree whose branch has nothing beyond the default branch looks the same way, so, like `wt step prune`, wt-dash calls it Safe only once it is a day old. Until then it is Review, with a reason such as "Created 2h ago, so it may still be in use", and `a` leaves it out. Its age comes from when Git created its folder under `.git/worktrees`; if that can't be read, it stays Review. A branch whose own commits reached the default branch through a squash or rebase merge is Safe at any age.
+Safe means Worktrunk reports clean content that is already in the default branch, or identical to it. Worktrunk reports a new worktree the same way when its branch has nothing beyond the default branch. So wt-dash calls such a worktree Safe only once it is a day old, as `wt step prune` does. Until then it is Review, with a reason such as "Created 2h ago, so it may still be in use", and `a` leaves it out. Its age comes from when Git created its folder under `.git/worktrees`; if that can't be read, it stays Review. A branch whose own commits reached the default branch through a squash or rebase merge is Safe at any age.
 
 wt-dash also reads agent marks. Worktrunk's agent plugins, such as the one `wt config plugins claude install` adds, mark a branch 🤖 while an agent works in it and 💬 while it waits for input, and clear the mark when the session ends. A worktree that would be Safe but has a mark set in the last day is Review instead, with a reason such as "An agent was working here 20m ago"; you can still remove it. A mark whose time can't be read counts as recent. An older mark is probably left from a session that didn't end cleanly, so it only shows in the details, as "Agent mark from 28d ago, likely stale". Marks belong to a branch name, so renaming a branch drops its mark.
 
@@ -157,7 +157,7 @@ wt-dash does not check pull request status.
 
 ### Orphaned folders
 
-Git and Worktrunk find a worktree only through its repository, so a worktree folder whose link to its repository broke is invisible to both. wt-dash looks for these in the folders agents keep worktrees in: `.claude/worktrees` inside each scanned repository, `~/.codex/worktrees`, and t3's `~/.t3/worktrees` and `~/.t3-lines/lines/worktrees`. They are listed under "Orphaned folders", last on the projects screen and in "All projects", with their size and the reason:
+Git and Worktrunk find a worktree only through its repository, so neither can see a worktree folder whose link to its repository is broken. wt-dash looks for these in the folders agents keep worktrees in: `.claude/worktrees` inside each scanned repository, `~/.codex/worktrees`, and t3's `~/.t3/worktrees` and `~/.t3-lines/lines/worktrees`. They are listed under "Orphaned folders", last on the projects screen and in "All projects", with their size and the reason:
 
 - The repository was deleted or moved: "Its repository at ~/old/app no longer exists."
 - The repository is still there but no longer records the worktree, for example after a re-clone or a prune: "Its repository at ~/code/app no longer lists it."
@@ -166,7 +166,7 @@ Git and Worktrunk find a worktree only through its repository, so a worktree fol
 <details>
 <summary>Moved repositories and other details</summary>
 
-A worktree whose link to its repository still works is never listed, wherever that repository lives. Moving a repository breaks that link but keeps its record of the worktree: if the repository is in a scanned folder, its worktrees are not listed, and `git worktree repair` run in it fixes them; if it lives elsewhere, wt-dash can't see the record and lists them as orphaned. When a scanned repository's records can't be read, the folders they might hold are left out rather than offered for deletion.
+A worktree whose link to its repository still works is never listed as orphaned, wherever that repository lives. Moving a repository breaks that link, but the repository keeps its record of the worktree. If the moved repository is in a scanned folder, its worktrees are not listed, and running `git worktree repair` in it fixes them. If it lives elsewhere, wt-dash can't see the record and lists them as orphaned. When a scanned repository's records can't be read, the folders they might hold are left out rather than offered for deletion.
 
 Rows are named by their folder and the one above it, such as `abcd/app` for `~/.codex/worktrees/abcd/app`. `a` selects Safe rows only, so it never selects an orphaned folder.
 
@@ -212,7 +212,7 @@ Each attempt is logged to `~/.cache/wt-dash/removals.log`.
 <details>
 <summary>What is checked again just before each removal</summary>
 
-A worktree is skipped, and comes back with a note, if since you confirmed its Git status, commit or lock changed, it was created again at the same path, a rebase or merge started, or an agent marked it. A branch without a worktree is skipped if it moved, was deleted or now has a worktree, or if a worktree folder has the same name as the branch, because Worktrunk would remove that worktree instead. Whether a branch is merged is checked again when its repository's removals start, and again for a worktree whose default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
+A worktree is skipped, and comes back with a note, if any of these happened since you confirmed: its Git status, commit or lock changed, it was created again at the same path, a rebase or merge started, or an agent marked it. A branch without a worktree is skipped if it moved, was deleted or now has a worktree, or if a worktree folder has the same name as the branch, because Worktrunk would remove that worktree instead. Whether a branch is merged is checked again when its repository's removals start, and again for a worktree whose default or upstream branch moved since. Worktrunk makes the final call on deleting the branch.
 
 An orphaned folder is deleted only if it is still the folder you confirmed and still orphaned for the same reason.
 
@@ -236,9 +236,9 @@ wt-dash --doctor         # check Git, Worktrunk and folder access without openin
 
 wt-dash looks for repositories up to two folder levels below each folder (`--depth` changes this). Point it at main repositories, not linked worktrees, or at the folders that contain them. Worktrees stored elsewhere still show up, because Worktrunk lists every worktree linked to a repository wherever it lives.
 
-Without folders, it scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, each only if it exists, and follows each worktree in the agents' folders in your home folder (those in [Which tool made a worktree](#which-tool-made-a-worktree)) back to its repository, so a repository with an agent worktree shows up wherever it lives. If that finds nothing, wt-dash says which folders it scanned; `wt-dash --doctor` lists them with how many repositories each found.
+Without folders, it scans `~/projects`, `~/code`, `~/dev`, `~/src` and `~/work`, each only if it exists. It also follows each worktree in the agents' folders in your home folder (those in [Which tool made a worktree](#which-tool-made-a-worktree)) back to its repository, so a repository with an agent worktree shows up wherever it lives. If that finds nothing, wt-dash says which folders it scanned, and `wt-dash --doctor` lists them with how many repositories each found.
 
-wt-dash remembers every repository it finds, whether in those folders, through an agent's worktree, or in folders you name, in `~/.local/state/wt-dash/repos.json` (`$XDG_STATE_HOME/wt-dash/repos.json` when `XDG_STATE_HOME` is set). A run without folders lists the remembered repositories too, so running `wt-dash ~/elsewhere` once is enough for a repository outside the usual folders. A run with folders still shows only those folders, and only adds to the list. A repository whose folder is gone, or is no longer a Git repository, is dropped from the list at the next scan. To forget them all, delete the file. `wt-dash --doctor` shows the file and how many repositories it holds.
+wt-dash remembers every repository it finds, whether in those folders, through an agent's worktree, or in folders you name. It keeps the list in `~/.local/state/wt-dash/repos.json` (`$XDG_STATE_HOME/wt-dash/repos.json` when `XDG_STATE_HOME` is set). A run without folders lists the remembered repositories too, so running `wt-dash ~/elsewhere` once is enough for a repository outside the usual folders. A run with folders still shows only those folders, and only adds to the list. A repository whose folder is gone, or is no longer a Git repository, is dropped from the list at the next scan. To forget them all, delete the file. `wt-dash --doctor` shows the file and how many repositories it holds.
 
 ### Wide and narrow terminals
 
@@ -251,7 +251,7 @@ At 100 columns or more, the projects sit in a sidebar and the focused project's 
 
 A worktree's strip says what it holds, such as `3 commits ahead of main · +16 · “Document the per-IP rate limits”`: its commits beyond the default branch, the lines they add and remove, and the latest one's subject. `i` adds how far the default branch has moved on since. Notes left on a branch show under that line and in `i`: its Git description (`git branch --edit-description`) and any Worktrunk vars (`wt config state vars set ticket=API-142`), which a Worktrunk hook or an agent can set when it creates the worktree.
 
-Projects with the most worktrees come first, each with how much space its Safe worktrees take. They appear as soon as wt-dash has counted each repository's worktrees from Git's records, and each project's rows fill in as Worktrunk lists them: worktrees first, then branches without a worktree once every project's worktrees are in, since those can take most of a listing when Worktrunk's cache is cold. The first project is listed first, and the project whose worktrees took the most space at the last run second; their sizes are also measured first. If the scan finds only one project, wt-dash opens it directly.
+Projects with the most worktrees come first, each with how much space its Safe worktrees take. Projects appear as soon as wt-dash has counted each repository's worktrees from Git's records. Each project's rows then fill in as Worktrunk lists them. Worktrees come first, and branches without a worktree follow once every project's worktrees are in, since those branches can take most of a listing's time when Worktrunk's cache is cold. The top project is listed first, then the project whose worktrees took the most space at the last run, and those two projects' sizes are measured first too. If the scan finds only one project, wt-dash opens it directly.
 
 </details>
 
