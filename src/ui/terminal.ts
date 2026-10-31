@@ -53,6 +53,7 @@ export async function runTerminal(
   let state: UiState = initialState();
   let finished = false;
   let inspectTimer: ReturnType<typeof setTimeout> | null = null;
+  let inspectTarget: { id: string; generation: number } | null = null;
   let resolveExit!: () => void;
   const exit = new Promise<void>((resolve) => {
     resolveExit = resolve;
@@ -169,11 +170,21 @@ export async function runTerminal(
   function scheduleInspect(): void {
     if (!actions) return;
     const row = listView(state, snapshot).focus;
-    if (!row || row.kind !== "worktree" || state.files[row.id]) return;
-    if (inspectTimer) clearTimeout(inspectTimer);
     const generation = state.generation;
+    if (
+      row?.kind === "worktree" &&
+      inspectTarget?.id === row.id &&
+      inspectTarget.generation === generation
+    )
+      return;
+    if (inspectTimer) clearTimeout(inspectTimer);
+    inspectTimer = null;
+    inspectTarget = null;
+    if (!row || row.kind !== "worktree" || state.files[row.id]) return;
+    inspectTarget = { id: row.id, generation };
     inspectTimer = setTimeout(() => {
       inspectTimer = null;
+      inspectTarget = null;
       if (
         finished ||
         state.generation !== generation ||

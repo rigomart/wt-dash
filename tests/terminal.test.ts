@@ -429,6 +429,124 @@ test("details pane lists uncommitted changes and summarizes ignored files quietl
   }
 });
 
+for (const activity of ["scanning", "sizing", "toast"] as const) {
+  test(`focused file details load during ${activity} ticks (audit #4)`, async () => {
+    const inspected: string[] = [];
+    const item = row(
+      "api",
+      2000,
+      activity === "toast"
+        ? { locked: true }
+        : activity === "sizing"
+          ? { sizeKiB: null, sizeMeasuredAt: null }
+          : {},
+    );
+    const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
+      inspectFiles: async (selected) => {
+        inspected.push(selected.id);
+        return { localFiles: ["?? notes.md"], ignoredFiles: [], disposableIgnored: 0 };
+      },
+    });
+    const ui = await start(
+      130,
+      30,
+      [item],
+      actions,
+      activity === "scanning" ? "scanning" : "complete",
+    );
+    try {
+      if (activity === "scanning") ui.setup.mockInput.pressEnter();
+      if (activity === "sizing") ui.fake.update({ sizing: [item.path!] });
+      if (activity === "toast") ui.setup.mockInput.pressKey(" ");
+      await Bun.sleep(400);
+      const frame = await ui.frame();
+      expect(inspected).toEqual([item.id]);
+      expect(frame).toContain("uncommitted  notes.md");
+      if (activity === "scanning") expect(frame).toContain("scanning");
+      if (activity === "sizing") expect(frame).toContain("1 sizing");
+      if (activity === "toast") expect(frame).toContain("Can't select api");
+    } finally {
+      await ui.stop();
+    }
+  });
+}
+
+test("focus changes restart the file debounce, including a quick return to the same row (audit #4)", async () => {
+  const inspected: string[] = [];
+  const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
+    inspectFiles: async (selected) => {
+      inspected.push(selected.id);
+      return { localFiles: [], ignoredFiles: [], disposableIgnored: 0 };
+    },
+  });
+  const ui = await start(130, 30, [row("api", 2000), row("docs", 500)], actions);
+  try {
+    await Bun.sleep(90);
+    ui.setup.mockInput.pressArrow("down");
+    await Bun.sleep(90);
+    expect(inspected).toEqual([]);
+    ui.setup.mockInput.pressArrow("up");
+    await Bun.sleep(90);
+    expect(inspected).toEqual([]);
+    await Bun.sleep(100);
+    expect(inspected).toEqual(["api"]);
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("same-focus snapshot updates keep the pending file deadline (audit #4)", async () => {
+  let inspected = 0;
+  const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
+    inspectFiles: async () => {
+      inspected++;
+      return { localFiles: [], ignoredFiles: [], disposableIgnored: 0 };
+    },
+  });
+  const ui = await start(130, 30, [row("api", 2000)], actions);
+  const updates = setInterval(() => ui.fake.setRows([row("api", 2001)]), 50);
+  try {
+    await Bun.sleep(400);
+    expect(inspected).toBe(1);
+    expect(await ui.frame()).toContain("nothing uncommitted");
+  } finally {
+    clearInterval(updates);
+    await ui.stop();
+  }
+});
+
+test("a new generation restarts the file debounce and rejects the old report (audit #4)", async () => {
+  const finishes: Array<(report: Awaited<ReturnType<ActionService["inspectFiles"]>>) => void> = [];
+  const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
+    inspectFiles: () => new Promise((resolve) => finishes.push(resolve)),
+  });
+  const ui = await start(130, 30, [row("api", 2000)], actions);
+  const report = (name: string) => ({
+    localFiles: [`?? ${name}`],
+    ignoredFiles: [],
+    disposableIgnored: 0,
+  });
+  try {
+    await Bun.sleep(200);
+    expect(finishes).toHaveLength(1);
+    ui.fake.update({ generation: 2 });
+    await Bun.sleep(90);
+    ui.fake.update({ generation: 3 });
+    await Bun.sleep(90);
+    expect(finishes).toHaveLength(1);
+    await Bun.sleep(100);
+    expect(finishes).toHaveLength(2);
+    finishes[1]!(report("current.md"));
+    expect(await ui.frame()).toContain("uncommitted  current.md");
+    finishes[0]!(report("stale.md"));
+    const frame = await ui.frame();
+    expect(frame).toContain("uncommitted  current.md");
+    expect(frame).not.toContain("stale.md");
+  } finally {
+    await ui.stop();
+  }
+});
+
 test("x then y removes in the background while the table stays on screen", async () => {
   const item = row("api", 2000);
   let finishRemoval!: () => void;
@@ -463,6 +581,8 @@ test("x then y removes in the background while the table stays on screen", async
     expect(frame).toContain("1 worktree · up to 500 KB");
     expect(frame).not.toContain("• api");
     expect(focused(frame)).toContain("docs");
+    await Bun.sleep(400);
+    expect(await ui.frame()).toContain("nothing uncommitted");
     finishRemoval();
     frame = await ui.frame();
     expect(frame).toContain("Removed 1 worktree · freed 2.0 MB");
