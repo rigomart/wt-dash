@@ -1,6 +1,6 @@
 {
   "name": "wt-dash",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A macOS and Linux terminal dashboard for reviewing and cleaning up Git worktrees across repositories.",
   "license": "MIT",
   "os": [
