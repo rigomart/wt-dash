@@ -48,11 +48,14 @@ export function createSizeService(
   const cachedWaiters: Array<() => void> = [];
   const tasks = new Set<Promise<SizeEntry | null>>();
   const inFlight = new Map<string, Promise<SizeEntry | null>>();
+  const newestByPath = new Map<string, number>();
   const abort = new AbortController();
+  let requests = 0;
   let active = 0;
   let closed = false;
   let writeNumber = 0;
-  let writes: Promise<void> = Promise.resolve();
+  let dirty = false;
+  let writes: Promise<void> | null = null;
 
   async function acquire(hadEntry: boolean, first: boolean): Promise<boolean> {
     if (closed) return false;
@@ -77,16 +80,23 @@ export function createSizeService(
   }
 
   function persist(): Promise<void> {
-    writes = writes
-      .then(async () => {
-        await mkdir(dirname(cachePath), { recursive: true });
-        const temporary = `${cachePath}.tmp-${process.pid}-${++writeNumber}`;
-        await writeFile(temporary, JSON.stringify(Object.fromEntries(cache), null, 2));
-        await rename(temporary, cachePath);
-      })
-      .catch(() => {
-        // A cache write failure must not hide a measured worktree.
-      });
+    dirty = true;
+    writes ??= Promise.resolve().then(async () => {
+      try {
+        while (dirty) {
+          dirty = false;
+          try {
+            await mkdir(dirname(cachePath), { recursive: true });
+            const temporary = `${cachePath}.tmp-${process.pid}-${++writeNumber}`;
+            dirty = false;
+            await writeFile(temporary, JSON.stringify(Object.fromEntries(cache), null, 2));
+            await rename(temporary, cachePath);
+          } catch {}
+        }
+      } finally {
+        writes = null;
+      }
+    });
     return writes;
   }
 
@@ -102,14 +112,17 @@ export function createSizeService(
     );
   }
 
-  async function run(path: string, first = false): Promise<SizeEntry | null> {
+  async function run(path: string, ticket: number, first = false): Promise<SizeEntry | null> {
+    newestByPath.set(path, Math.max(ticket, newestByPath.get(path) ?? 0));
     if (!(await acquire(cache.has(path), first))) return null;
+    let saved = Promise.resolve();
+    let measured: SizeEntry | null = null;
     try {
       // Stat before du, so a change made while du runs is caught next time.
       const signature = await readSignature(path);
       if (closed) return null;
       const result = await runner(du, ["-sk", path], abort.signal);
-      if (result.exitCode !== 0) return null;
+      if (closed || newestByPath.get(path) !== ticket || result.exitCode !== 0) return null;
       const match = /^(\d+)\s/.exec(result.stdout);
       if (!match) return null;
       const sizeKiB = Number(match[1]);
@@ -117,13 +130,15 @@ export function createSizeService(
       const entry: SizeEntry = { sizeKiB, measuredAt: new Date(now()).toISOString() };
       if (signature) entry.signature = signature;
       cache.set(path, entry);
-      await persist();
-      return entry;
+      saved = persist();
+      measured = entry;
     } catch {
       return null;
     } finally {
       release();
     }
+    await saved;
+    return !closed && newestByPath.get(path) === ticket ? measured : null;
   }
 
   function track(task: Promise<SizeEntry | null>): Promise<SizeEntry | null> {
@@ -164,13 +179,15 @@ export function createSizeService(
     },
     measure(path) {
       if (closed) return Promise.resolve(null);
-      return track(run(path));
+      const ticket = ++requests;
+      return track(run(path, ticket));
     },
     measureIfStale(path, first = false) {
       if (closed) return Promise.resolve(null);
       const pending = inFlight.get(path);
       if (pending) return pending;
-      const task = track(isFresh(path).then((fresh) => (fresh ? null : run(path, first))));
+      const ticket = ++requests;
+      const task = track(isFresh(path).then((fresh) => (fresh ? null : run(path, ticket, first))));
       inFlight.set(path, task);
       void task.finally(() => inFlight.delete(path));
       return task;

@@ -1,6 +1,7 @@
-import { afterAll, afterEach, beforeAll, expect, test, setDefaultTimeout } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, spyOn, test, setDefaultTimeout } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import * as fs from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createSandbox,
@@ -138,4 +139,154 @@ test("keeps measured sizes in the removal plan (#21)", async () => {
     sizeKiB: measured.sizeKiB,
     measuredAt: measured.measuredAt,
   });
+});
+
+test("audit #5: scan, manual remeasure, rescan and restart keep the newest real du result", async () => {
+  const repo = await sandbox.repo("overlapping-sizes");
+  const built = await repo.sizedWorktree("sized", { kib: 512 });
+  const path = built.path!;
+  const matches = on(named("du"), path);
+  let first = true;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const measured = new Promise<void>((resolve) => (reached = resolve));
+  const app = await sandbox.services({
+    runner: async (command, args, signal, environment) => {
+      const hold = first && matches({ command, args });
+      if (hold) first = false;
+      const result = await sandbox.runner(command, args, signal, environment);
+      if (hold) {
+        reached();
+        await blocked;
+      }
+      return result;
+    },
+  });
+  try {
+    await app.dashboard.refresh([repo.path]);
+    await measured;
+    const shown = row(app.dashboard.getSnapshot(), built);
+    await writeFile(join(path, "more.bin"), randomBytes(2048 * 1024));
+    await app.dashboard.refreshSize(shown.id);
+    const newest = app.sizes.get(path)!;
+    expect(newest.sizeKiB).toBeGreaterThanOrEqual(2560);
+    release();
+    await waitFor(app.dashboard, (snapshot) => !snapshot.sizing.includes(path));
+    expect(app.sizes.get(path)).toEqual(newest);
+    await app.dashboard.refresh([repo.path]);
+    await app.sizes.measureIfStale(path);
+    expect(row(app.dashboard.getSnapshot(), built).sizeKiB).toBe(newest.sizeKiB);
+    await app.close();
+    expect(JSON.parse(await readFile(join(sandbox.cacheDir, "sizes.json"), "utf8"))[path]).toEqual(
+      newest,
+    );
+    const restarted = await sandbox.services();
+    try {
+      await restarted.dashboard.refresh([repo.path]);
+      expect(row(restarted.dashboard.getSnapshot(), built).sizeKiB).toBe(newest.sizeKiB);
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    release();
+    await app.close();
+  }
+});
+
+test.each([true, false])(
+  "audit #5/#7: a rescan joining a persisting older result keeps the manual size (older finishes first=%s)",
+  async (olderFirst) => {
+    const repo = await sandbox.repo(`rejoined-sizes-${olderFirst}`);
+    const built = await repo.sizedWorktree("sized", { kib: 512 });
+    const path = built.path!;
+    const matches = on(named("du"), path);
+    const releases: Array<() => void> = [];
+    const starts: Array<() => void> = [];
+    const gates = [0, 1].map((i) => new Promise<void>((resolve) => (releases[i] = resolve)));
+    const reached = [0, 1].map((i) => new Promise<void>((resolve) => (starts[i] = resolve)));
+    const rename = fs.rename;
+    let heldWrite = false;
+    const spy = spyOn(fs, "rename").mockImplementation(async (...args) => {
+      if (
+        !heldWrite &&
+        args[1] === join(sandbox.cacheDir, "sizes.json") &&
+        JSON.parse(await readFile(args[0], "utf8"))[path]
+      ) {
+        heldWrite = true;
+        starts[0]!();
+        await gates[0];
+      }
+      return rename(...args);
+    });
+    let number = 0;
+    const app = await sandbox.services({
+      runner: async (command, args, signal, environment) => {
+        const index = matches({ command, args }) ? number++ : -1;
+        const result = await sandbox.runner(command, args, signal, environment);
+        if (index === 1) {
+          starts[1]!();
+          await gates[1];
+        }
+        return result;
+      },
+    });
+    try {
+      await app.dashboard.refresh([repo.path]);
+      await reached[0];
+      const shown = row(app.dashboard.getSnapshot(), built);
+      await writeFile(join(path, "more.bin"), randomBytes(2048 * 1024));
+      const forced = app.dashboard.refreshSize(shown.id);
+      await reached[1];
+      await app.dashboard.refresh([repo.path]);
+      if (olderFirst) {
+        releases[0]!();
+        await app.sizes.measureIfStale(path);
+        releases[1]!();
+      } else {
+        releases[1]!();
+        const deadline = Date.now() + 1000;
+        while (app.sizes.get(path)!.sizeKiB < 2560) {
+          if (Date.now() > deadline)
+            throw new Error("manual size was not accepted while the write was blocked");
+          await Bun.sleep(1);
+        }
+        releases[0]!();
+      }
+      await forced;
+      await waitFor(app.dashboard, (snapshot) => !snapshot.sizing.includes(path));
+      expect(app.sizes.get(path)!.sizeKiB).toBeGreaterThanOrEqual(2560);
+      expect(row(app.dashboard.getSnapshot(), built).sizeKiB).toBe(app.sizes.get(path)!.sizeKiB);
+    } finally {
+      for (const release of releases) release();
+      await app.close();
+      spy.mockRestore();
+    }
+  },
+);
+
+test("audit #7: a real fresh-cache rescan avoids one publication per worktree", async () => {
+  const repo = await sandbox.repo("fresh-many");
+  for (let i = 0; i < 20; i++) await repo.sizedWorktree(`sized-${i}`, { kib: 8 });
+  const recorder = recording();
+  const app = await sandbox.services({ runner: recorder.runner });
+  try {
+    await app.dashboard.refresh([repo.path]);
+    await waitFor(app.dashboard, (snapshot) => snapshot.sizing.length === 0);
+    const du = recorder.count(named("du"));
+    let publications = 0;
+    const unsubscribe = app.dashboard.subscribe(() => publications++);
+    try {
+      await app.dashboard.refresh([repo.path]);
+      await waitFor(app.dashboard, (snapshot) => snapshot.sizing.length === 0);
+      expect(app.dashboard.getSnapshot().rows).toHaveLength(20);
+      expect(app.dashboard.getSnapshot().rows.every((row) => row.sizeKiB !== null)).toBe(true);
+      expect(recorder.count(named("du"))).toBe(du);
+      expect(publications).toBeLessThan(20);
+    } finally {
+      unsubscribe();
+    }
+  } finally {
+    await app.close();
+  }
 });

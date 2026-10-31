@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -437,7 +438,228 @@ test("measure starts its own du even while a stale check for the path is running
   await fake.reached(2);
   releaseStale();
   fake.gates.get("/p")!();
-  expect((await Promise.all([stale, forced])).map((entry) => entry?.sizeKiB)).toEqual([20, 20]);
+  expect((await Promise.all([stale, forced])).map((entry) => entry?.sizeKiB)).toEqual([
+    undefined,
+    20,
+  ]);
   expect(fake.started).toEqual(["/p", "/p"]);
   await sizes.close();
+});
+
+test("audit #5: an older du cannot replace a newer manual measurement in memory or on disk", async () => {
+  const path = await cachePath();
+  const fake = gatedRunner();
+  let number = 0;
+  const sizes = createSizeService(
+    path,
+    async (...args) => {
+      const value = ++number === 1 ? 100 : 200;
+      const result = await fake.runner(...args);
+      return { ...result, stdout: `${value}\t/p\n` };
+    },
+    2,
+  );
+  const older = sizes.measureIfStale("/p");
+  await fake.reached(1);
+  const releaseOlder = fake.gates.get("/p")!;
+  const newer = sizes.measure("/p");
+  await fake.reached(2);
+  fake.gates.get("/p")!();
+  await newer;
+  releaseOlder();
+  await older;
+  await sizes.close();
+  expect(sizes.get("/p")?.sizeKiB).toBe(200);
+  expect(JSON.parse(await readFile(path, "utf8"))["/p"].sizeKiB).toBe(200);
+});
+
+test("audit #8: pending cache writes coalesce without holding du slots and close flushes them", async () => {
+  const path = await cachePath();
+  const rename = fs.rename;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const writing = new Promise<void>((resolve) => (reached = resolve));
+  let writes = 0;
+  const spy = spyOn(fs, "rename").mockImplementation(async (...args) => {
+    if (++writes === 1) {
+      reached();
+      await blocked;
+    }
+    return rename(...args);
+  });
+  const started: string[] = [];
+  let allStarted!: () => void;
+  const measuring = new Promise<void>((resolve) => (allStarted = resolve));
+  const sizes = createSizeService(
+    path,
+    async (_command, args) => {
+      started.push(args[1]!);
+      if (started.length === 12) allStarted();
+      return { stdout: `20\t${args[1]}\n`, stderr: "", exitCode: 0 };
+    },
+    1,
+  );
+  let settled = 0;
+  const tasks = Array.from({ length: 12 }, (_, i) =>
+    sizes.measure(`/p${i}`).then((entry) => {
+      settled++;
+      return entry;
+    }),
+  );
+  try {
+    await writing;
+    await Promise.race([
+      measuring,
+      Bun.sleep(1000).then(() => {
+        throw new Error("du slots waited for persistence");
+      }),
+    ]);
+    expect(settled).toBe(0);
+    let closed = false;
+    const closing = sizes.close().then(() => {
+      closed = true;
+    });
+    await Bun.sleep(0);
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    await Promise.all(tasks);
+    expect(writes).toBeLessThanOrEqual(2);
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    expect(Object.keys(saved)).toHaveLength(12);
+    expect(saved["/p11"].sizeKiB).toBe(20);
+  } finally {
+    release();
+    await sizes.close();
+    spy.mockRestore();
+  }
+});
+
+test("audit #5: a failed newest request keeps the saved size even if the older du succeeds", async () => {
+  const path = await cachePath();
+  await writeFile(
+    path,
+    JSON.stringify({ "/p": { sizeKiB: 8, measuredAt: "2026-09-28T00:00:00Z" } }),
+  );
+  const fake = gatedRunner();
+  let number = 0;
+  const sizes = createSizeService(
+    path,
+    async (...args) => {
+      const fails = ++number === 2;
+      const result = await fake.runner(...args);
+      return { ...result, exitCode: fails ? 1 : 0 };
+    },
+    2,
+  );
+  await sizes.load();
+  const older = sizes.measureIfStale("/p");
+  await fake.reached(1);
+  const releaseOlder = fake.gates.get("/p")!;
+  const newer = sizes.measure("/p");
+  await fake.reached(2);
+  fake.gates.get("/p")!();
+  expect(await newer).toBeNull();
+  releaseOlder();
+  expect(await older).toBeNull();
+  await sizes.close();
+  expect(sizes.get("/p")?.sizeKiB).toBe(8);
+  expect(JSON.parse(await readFile(path, "utf8"))["/p"].sizeKiB).toBe(8);
+});
+
+test("audit #5: a fresh no-op check does not discard an in-progress forced measurement", async () => {
+  const path = await worktreeWithFixedMtime();
+  const fake = gatedRunner();
+  const sizes = createSizeService(await cachePath(), fake.runner);
+  const seed = sizes.measure(path);
+  await fake.reached(1);
+  fake.gates.get(path)!();
+  await seed;
+  const forced = sizes.measure(path);
+  await fake.reached(2);
+  expect(await sizes.measureIfStale(path)).toBeNull();
+  fake.gates.get(path)!();
+  expect((await forced)?.sizeKiB).toBe(20);
+  await sizes.close();
+});
+
+test("audit #5: close discards a successful result returned after cancellation", async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const started = new Promise<void>((resolve) => (reached = resolve));
+  const sizes = createSizeService(await cachePath(), async () => {
+    reached();
+    await blocked;
+    return { stdout: "20\t/p\n", stderr: "", exitCode: 0 };
+  });
+  const measured = sizes.measure("/p");
+  await started;
+  const closed = sizes.close();
+  release();
+  await closed;
+  expect(await measured).toBeNull();
+  expect(sizes.get("/p")).toBeNull();
+});
+
+test("audit #8: a failed cache write keeps measured sizes and a later write retries them", async () => {
+  const path = await cachePath();
+  await writeFile(path, "blocks the parent folder");
+  const sizes = createSizeService(join(path, "sizes.json"), async () => ({
+    stdout: "20\tpath\n",
+    stderr: "",
+    exitCode: 0,
+  }));
+  expect((await sizes.measure("/first"))?.sizeKiB).toBe(20);
+  expect(sizes.get("/first")?.sizeKiB).toBe(20);
+  await rm(path);
+  expect((await sizes.measure("/second"))?.sizeKiB).toBe(20);
+  await sizes.close();
+  expect(Object.keys(JSON.parse(await readFile(join(path, "sizes.json"), "utf8")))).toEqual([
+    "/first",
+    "/second",
+  ]);
+});
+
+test("audit #5/#8: a result superseded while persisting does not return an obsolete entry", async () => {
+  const path = await cachePath();
+  const rename = fs.rename;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const writing = new Promise<void>((resolve) => (reached = resolve));
+  let first = true;
+  const spy = spyOn(fs, "rename").mockImplementation(async (...args) => {
+    if (first) {
+      first = false;
+      reached();
+      await blocked;
+    }
+    return rename(...args);
+  });
+  let number = 0;
+  const sizes = createSizeService(path, async () => ({
+    stdout: `${++number * 100}\t/p\n`,
+    stderr: "",
+    exitCode: 0,
+  }));
+  const older = sizes.measureIfStale("/p");
+  try {
+    await writing;
+    const newer = sizes.measure("/p");
+    const deadline = Date.now() + 1000;
+    while (sizes.get("/p")?.sizeKiB !== 200) {
+      if (Date.now() > deadline) throw new Error("new measurement waited for the cache writer");
+      await Bun.sleep(1);
+    }
+    release();
+    expect(await older).toBeNull();
+    expect((await newer)?.sizeKiB).toBe(200);
+    expect(JSON.parse(await readFile(path, "utf8"))["/p"].sizeKiB).toBe(200);
+  } finally {
+    release();
+    await sizes.close();
+    spy.mockRestore();
+  }
 });

@@ -39,6 +39,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
   const controllers = new Set<AbortController>();
   const runningByPath = new Map<string, number>();
   const newestTicketByPath = new Map<string, number>();
+  const ticketByTask = new WeakMap<Promise<SizeEntry | null>, number>();
+  let rowsByPath = new Map<string, WorktreeRow[]>();
+  const completed = new Map<string, SizeEntry>();
+  let completionTimer: ReturnType<typeof setTimeout> | null = null;
+  const completionWaiters: Array<() => void> = [];
   let measurements = 0;
   let closed = false;
   let generation = 0;
@@ -54,6 +59,15 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
   };
 
   function publish(next: Omit<DashboardSnapshot, "sizing">): void {
+    if (next.rows !== snapshot.rows) {
+      rowsByPath = new Map();
+      for (const row of next.rows) {
+        if (row.path === null) continue;
+        const rows = rowsByPath.get(row.path) ?? [];
+        rows.push(row);
+        rowsByPath.set(row.path, rows);
+      }
+    }
     snapshot = { ...next, sizing: [...runningByPath.keys()] };
     for (const listener of listeners) listener(snapshot);
   }
@@ -71,8 +85,9 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
 
   /** Callers publish afterwards, so the sizing mark reaches the screen. */
   function track(path: string, task: Promise<SizeEntry | null>): Promise<void> {
-    const ticket = ++measurements;
-    newestTicketByPath.set(path, ticket);
+    const ticket = ticketByTask.get(task) ?? ++measurements;
+    ticketByTask.set(task, ticket);
+    newestTicketByPath.set(path, Math.max(ticket, newestTicketByPath.get(path) ?? 0));
     runningByPath.set(path, (runningByPath.get(path) ?? 0) + 1);
     return task
       .catch(() => null)
@@ -83,20 +98,50 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         const newest = newestTicketByPath.get(path) === ticket;
         if (!left) newestTicketByPath.delete(path);
         if (closed) return;
-        const entry = newest ? (measured ?? options.sizeService.get(path)) : null;
-        let changed = !left;
-        const rows = snapshot.rows.map((row) => {
-          if (
-            !entry ||
-            row.path !== path ||
-            (row.sizeKiB === entry.sizeKiB && row.sizeMeasuredAt === entry.measuredAt)
-          )
-            return row;
-          changed = true;
-          return { ...row, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt };
-        });
-        if (changed) publish({ ...snapshot, rows });
+        const cached = options.sizeService.get(path);
+        const entry = newest ? (measured ?? cached) : null;
+        if (entry) completed.set(path, entry);
+        if (measured || !cached) {
+          flushCompletions();
+          return;
+        }
+        const flushed = new Promise<void>((resolve) => completionWaiters.push(resolve));
+        completionTimer ??= setTimeout(flushCompletions, 16);
+        return flushed;
       });
+  }
+
+  function flushCompletions(): void {
+    if (completionTimer !== null) clearTimeout(completionTimer);
+    completionTimer = null;
+    const waiters = completionWaiters.splice(0);
+    if (closed) {
+      completed.clear();
+      for (const resolve of waiters) resolve();
+      return;
+    }
+    const changed = new Map<string, SizeEntry>();
+    for (const [path, measured] of completed) {
+      const entry = options.sizeService.get(path) ?? measured;
+      if (
+        rowsByPath
+          .get(path)
+          ?.some((row) => row.sizeKiB !== entry.sizeKiB || row.sizeMeasuredAt !== entry.measuredAt)
+      )
+        changed.set(path, entry);
+    }
+    completed.clear();
+    const rows = changed.size
+      ? snapshot.rows.map((row) => {
+          const entry = row.path === null ? null : changed.get(row.path);
+          return entry ? { ...row, sizeKiB: entry.sizeKiB, sizeMeasuredAt: entry.measuredAt } : row;
+        })
+      : snapshot.rows;
+    const sizingChanged =
+      snapshot.sizing.length !== runningByPath.size ||
+      snapshot.sizing.some((path) => !runningByPath.has(path));
+    if (sizingChanged || changed.size) publish({ ...snapshot, rows });
+    for (const resolve of waiters) resolve();
   }
 
   function scheduleSizes(rows: WorktreeRow[], first: boolean): void {
@@ -367,6 +412,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     },
     async close() {
       closed = true;
+      flushCompletions();
       for (const controller of controllers) controller.abort();
       controllers.clear();
       listeners.clear();

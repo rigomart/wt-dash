@@ -59,7 +59,7 @@ function waitFor(
     const unsubscribe = service.subscribe((snapshot) => {
       if (predicate(snapshot)) {
         clearTimeout(timer);
-        queueMicrotask(unsubscribe);
+        queueMicrotask(() => unsubscribe());
         resolve(snapshot);
       }
     });
@@ -538,7 +538,7 @@ test("Git-safe rows are immediately available while other repositories are still
   }
 });
 
-test("a scan measures only stale sizes and publishes once as each measurement settles", async () => {
+test("a scan measures only stale sizes and publishes as each measurement settles", async () => {
   const forced: string[] = [];
   const checked: string[] = [];
   const settle: Array<() => void> = [];
@@ -637,7 +637,7 @@ test("a fresh size saved while a rescan was listing still reaches the screen", a
   });
   try {
     await service.refresh();
-    await Bun.sleep(0);
+    await waitFor(service, (snapshot) => snapshot.rows.every((row) => row.sizeKiB === 20));
     expect(service.getSnapshot().rows.map((row) => row.sizeKiB)).toEqual([20, 20]);
   } finally {
     await service.close();
@@ -1078,4 +1078,129 @@ test("a failed orphan search drops orphan rows at the end of a full scan and rec
     "complete",
   ]);
   await service.close();
+});
+
+test.each([false, true])(
+  "audit #7: fresh checks batch completions across callbacks (async=%s)",
+  async (asynchronous) => {
+    const cached = { sizeKiB: 10, measuredAt: "2026-10-01T00:00:00Z" };
+    const prototype = fixture.items[1]!;
+    const items = Array.from({ length: 1000 }, (_, i) => ({
+      ...prototype,
+      branch: `feature-${i}`,
+      worktree: { ...prototype.worktree, path: `/fake/worktree-${i}` },
+    }));
+    const service = createDashboardService({
+      projectRoot: "/fake",
+      wtPath: "/wt",
+      discover: async () => ["/fake/repo"],
+      readLinked: async () => ({ count: 1000, paths: [], unread: [] }),
+      readCreated: async () => "2020-01-01T00:00:00Z",
+      runner: async (_command, args) =>
+        args.includes("list") ? result(JSON.stringify({ ...fixture, items })) : result("", 1),
+      sizeService: {
+        ...sizeService,
+        get: () => cached,
+        measureIfStale: async () => {
+          if (asynchronous) await new Promise<void>((resolve) => setImmediate(resolve));
+          return null;
+        },
+      },
+    });
+    const seen: DashboardSnapshot[] = [];
+    service.subscribe((snapshot) => seen.push(snapshot));
+    try {
+      await service.refresh();
+      await waitFor(service, (snapshot) => snapshot.sizing.length === 0);
+      expect(service.getSnapshot().rows).toHaveLength(1000);
+      expect(service.getSnapshot().sizing).toEqual([]);
+      expect(seen.some((snapshot) => snapshot.sizing.length === 1000)).toBe(true);
+      expect(seen.length).toBeLessThanOrEqual(8);
+      expect(seen.reduce((sum, snapshot) => sum + snapshot.rows.length, 0)).toBeLessThanOrEqual(
+        5000,
+      );
+    } finally {
+      await service.close();
+    }
+  },
+);
+
+test("audit #7: a cached no-op clears only its own sizing mark and keeps the row list", async () => {
+  const { sizes, held } = heldSizes();
+  const cached = { sizeKiB: 10, measuredAt: "2026-10-01T00:00:00Z" };
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    discover: async () => ["/repo"],
+    runner: async () => result(),
+    sizeService: { ...sizes, get: () => cached },
+  });
+  try {
+    await service.refresh();
+    const rows = service.getSnapshot().rows;
+    held[0]!.settle(null);
+    await waitFor(service, (snapshot) => snapshot.sizing.length === 1);
+    expect(service.getSnapshot().sizing).toEqual([held[1]!.path]);
+    expect(service.getSnapshot().rows).toBe(rows);
+    held[1]!.settle(null);
+    await waitFor(service, (snapshot) => snapshot.sizing.length === 0);
+    expect(service.getSnapshot().rows).toBe(rows);
+  } finally {
+    await service.close();
+  }
+});
+
+test("audit #5/#7: a delayed fresh check cannot replace a size accepted during manual persistence", async () => {
+  const before = { sizeKiB: 100, measuredAt: "2026-10-01T00:00:00Z" };
+  const after = { sizeKiB: 200, measuredAt: "2026-10-01T01:00:00Z" };
+  const saved = new Map<string, SizeEntry>();
+  let releaseManual!: () => void;
+  const persisting = new Promise<void>((resolve) => (releaseManual = resolve));
+  let releaseListing!: () => void;
+  const listing = new Promise<void>((resolve) => (releaseListing = resolve));
+  let reachedListing!: () => void;
+  const fullListing = new Promise<void>((resolve) => (reachedListing = resolve));
+  let holdListing = false;
+  const service = createDashboardService({
+    projectRoot: "/projects",
+    wtPath: "/wt",
+    discover: async () => ["/repo"],
+    readLinked: async () => ({ count: 2, paths: [], unread: [] }),
+    runner: async (_command, args) => {
+      if (holdListing && args.includes("--branches")) {
+        reachedListing();
+        await listing;
+      }
+      return result();
+    },
+    sizeService: {
+      ...sizeService,
+      get: (path) => saved.get(path) ?? before,
+      measure: async (path) => {
+        saved.set(path, after);
+        await persisting;
+        return after;
+      },
+    },
+  });
+  let manual: Promise<void> | undefined;
+  try {
+    await service.refresh();
+    await waitFor(service, (snapshot) => snapshot.sizing.length === 0);
+    const row = service.getSnapshot().rows[0]!;
+    holdListing = true;
+    const scan = service.refresh();
+    await fullListing;
+    manual = service.refreshSize(row.id);
+    releaseListing();
+    await scan;
+    await Bun.sleep(25);
+    expect(saved.get(row.path!)?.sizeKiB).toBe(200);
+    expect(service.getSnapshot().rows.find((item) => item.id === row.id)?.sizeKiB).toBe(200);
+  } finally {
+    releaseListing();
+    releaseManual();
+    await manual;
+    await service.close();
+  }
 });
