@@ -11,6 +11,7 @@ import { recheckBranch, recheckMark, recheckWorktree } from "./recheck";
 import type {
   ActionOptions,
   RemovalChoice,
+  RemovalEntry,
   RemovalPlan,
   RemovalProgress,
   RemovalResult,
@@ -48,6 +49,17 @@ async function snapshotRepo(
   const tips = await readTips(repoPath, rows.flatMap(verdictRefs), options.runner);
   const listing = await listRepo(repoPath, rows, options);
   return { listing, tips };
+}
+
+function confirmationSkipReason(entry: RemovalEntry, choice?: RemovalChoice): string | null {
+  if (entry.blockedReason || !choice?.include) return entry.blockedReason ?? "Not confirmed";
+  if (entry.requiresDiscard && !choice.discardChanges)
+    return "Discarding local files was not confirmed";
+  if (choice.forceDeleteBranch && !entry.branchWillBeRetained)
+    return "Forced branch deletion does not apply";
+  if (entry.row.kind === "branch" && entry.branchWillBeRetained && !choice.forceDeleteBranch)
+    return "Deleting the unmerged branch was not confirmed";
+  return null;
 }
 
 export async function removeBatch(
@@ -105,7 +117,10 @@ export async function removeBatch(
     const indexes = plan.entries.flatMap((entry, index) =>
       entry.row.repoPath === repo ? [index] : [],
     );
-    const repoRows = indexes.map((index) => plan.entries[index]!.row);
+    const repoRows = indexes.flatMap((index) => {
+      const entry = plan.entries[index]!;
+      return confirmationSkipReason(entry, choices[entry.row.id]) === null ? [entry.row] : [];
+    });
     let snapshot: Promise<RepoSnapshot> | undefined;
     for (const index of indexes) {
       const entry = plan.entries[index]!;
@@ -120,21 +135,9 @@ export async function removeBatch(
         skip("Cancelled");
         continue;
       }
-      if (entry.blockedReason || !choice?.include) {
-        skip(entry.blockedReason ?? "Not confirmed");
-        continue;
-      }
-      if (entry.requiresDiscard && !choice.discardChanges) {
-        skip("Discarding local files was not confirmed");
-        continue;
-      }
-      if (choice.forceDeleteBranch && !entry.branchWillBeRetained) {
-        skip("Forced branch deletion does not apply");
-        continue;
-      }
-      // Removing an unmerged branch without a worktree does nothing unless it is force-deleted.
-      if (row.kind === "branch" && entry.branchWillBeRetained && !choice.forceDeleteBranch) {
-        skip("Deleting the unmerged branch was not confirmed");
+      const unconfirmed = confirmationSkipReason(entry, choice);
+      if (unconfirmed !== null) {
+        skip(unconfirmed);
         continue;
       }
       if (row.kind === "orphan") {

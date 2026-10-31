@@ -81,7 +81,21 @@ export async function readTips(
   runner: CommandRunner,
 ): Promise<Map<string, string | null>> {
   const unique = [...new Set(refs)];
-  const tips = await Promise.all(unique.map((ref) => readTip(repoPath, ref, runner)));
+  const tips: Array<string | null> = [];
+  let next = 0;
+  let failed = false;
+  async function worker(): Promise<void> {
+    while (next < unique.length && !failed) {
+      const index = next++;
+      try {
+        tips[index] = await readTip(repoPath, unique[index]!, runner);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(8, unique.length) }, worker));
   return new Map(unique.map((ref, index) => [ref, tips[index]!]));
 }
 
