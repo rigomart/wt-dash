@@ -1,5 +1,5 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["licenses/**"],
+  "ignorePatterns": ["licenses/**", "CHANGELOG.md"],
   "sortPackageJson": false
 }
