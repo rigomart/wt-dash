@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readBranchCreatedAt, readComparisonBase } from "../../src/core/git/refs";
+import { readBranchCreatedAt, readComparisonBase, readTips } from "../../src/core/git/refs";
 import type { CommandRunner } from "../../src/core/types";
 const ok = (stdout = "") => ({ stdout, stderr: "", exitCode: 0 });
 test.each([
@@ -57,6 +57,49 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
+});
+
+test("many reference lookups keep Git process concurrency bounded", async () => {
+  const refs = Array.from({ length: 20 }, (_, index) => `refs/heads/lookup-${index}`);
+  for (const ref of refs) await git("update-ref", ref, "HEAD");
+  const sha = await git("rev-parse", "HEAD");
+  let active = 0;
+  let peak = 0;
+  let commands = 0;
+  const measured: CommandRunner = async (command, args) => {
+    commands++;
+    active++;
+    peak = Math.max(peak, active);
+    try {
+      return await runner(command, args);
+    } finally {
+      active--;
+    }
+  };
+  const tips = await readTips(repo, [...refs, refs[0]!], measured);
+  expect([...tips.keys()]).toEqual(refs);
+  expect([...tips.values()]).toEqual(Array(20).fill(sha));
+  expect(commands).toBe(20);
+  expect(peak).toBeLessThanOrEqual(8);
+});
+
+test("reference batches preserve missing refs, revision expressions and Git failures", async () => {
+  const sha = await git("rev-parse", "HEAD");
+  expect([
+    ...(await readTips(
+      repo,
+      ["HEAD", "refs/heads/absent", "HEAD^{commit}", "main@{upstream}"],
+      runner,
+    )),
+  ]).toEqual([
+    ["HEAD", sha],
+    ["refs/heads/absent", null],
+    ["HEAD^{commit}", sha],
+    ["main@{upstream}", null],
+  ]);
+  await expect(readTips(join(directory, "absent"), ["HEAD"], runner)).rejects.toThrow(
+    "git rev-parse exited",
+  );
 });
 
 test("a branch's age comes from its oldest reflog entry, else when its ref was written", async () => {
