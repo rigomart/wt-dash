@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1](https://github.com/rigomart/wt-dash/compare/v0.1.0...v0.1.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* keep size measurements current and batch cache writes ([#66](https://github.com/rigomart/wt-dash/issues/66)) ([1c0055f](https://github.com/rigomart/wt-dash/commit/1c0055f72fd4707ebc2d170fa7c214f2a9fe371a))
+* load focused file details during background updates ([#65](https://github.com/rigomart/wt-dash/issues/65)) ([2dab27f](https://github.com/rigomart/wt-dash/commit/2dab27f53f9c4d72e02d0e2ea2042b8650a1aa39))
+* preserve newer previews after cancelled checks ([#63](https://github.com/rigomart/wt-dash/issues/63)) ([e211b03](https://github.com/rigomart/wt-dash/commit/e211b03c0f99aed9cb66359d70336a0c57bbbe31))
+
+
+### Performance Improvements
+
+* bound Git reference lookups during removal ([#68](https://github.com/rigomart/wt-dash/issues/68)) ([2ea41e0](https://github.com/rigomart/wt-dash/commit/2ea41e0f793404a7586a8d72c86c3455115c7726))
+
 ## 0.1.0 (2026-10-30)
 
 
