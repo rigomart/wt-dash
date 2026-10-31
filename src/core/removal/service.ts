@@ -7,6 +7,8 @@ import type { ActionOptions, ActionService, PrunePlan, RemovalPlan } from "./typ
 export function createActionService(options: ActionOptions): ActionService {
   let removalPlan: RemovalPlan | null = null;
   let prunePlan: PrunePlan | null = null;
+  let removalRequest = 0;
+  let pruneRequest = 0;
   let pruning = false;
   let queue: Promise<unknown> = Promise.resolve();
   let removals = 0;
@@ -16,8 +18,11 @@ export function createActionService(options: ActionOptions): ActionService {
     async prepareRemoval(rows) {
       if (pruning) throw new Error("Cleanup is running");
       if (!rows.length) throw new Error("Select at least one worktree");
-      removalPlan = await planRemoval(rows, options);
-      return removalPlan;
+      const request = ++removalRequest;
+      removalPlan = null;
+      const plan = await planRemoval(rows, options);
+      if (request === removalRequest) removalPlan = plan;
+      return plan;
     },
     async executeRemoval(plan, choices, onProgress, shouldStop) {
       if (pruning) throw new Error("Cleanup is running");
@@ -34,8 +39,11 @@ export function createActionService(options: ActionOptions): ActionService {
     },
     async preparePrune(repoPath) {
       if (pruning || removals) throw new Error("Cleanup is running");
-      prunePlan = await previewPrune(repoPath, options.runner);
-      return prunePlan;
+      const request = ++pruneRequest;
+      prunePlan = null;
+      const plan = await previewPrune(repoPath, options.runner);
+      if (request === pruneRequest) prunePlan = plan;
+      return plan;
     },
     async executePrune(plan) {
       if (pruning || removals) throw new Error("Cleanup is running");
