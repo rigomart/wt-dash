@@ -14,10 +14,24 @@ brew install rigomart/tap/wt-dash
 
 This installs [Worktrunk](https://worktrunk.dev/) too. wt-dash needs Git and Worktrunk 0.80.0 or newer, and runs on macOS 13 or newer (Apple Silicon and Intel) and on Linux with glibc (arm64 and x64). Alpine and other musl-based distributions are not supported. On a glibc system, `ldd --version` prints "GNU libc". On Intel Macs and Linux, and anywhere else Homebrew has no prebuilt Worktrunk, Homebrew compiles Worktrunk from source, which takes a few minutes.
 
-To install without Homebrew, download the archive for your system from the [latest release](https://github.com/rigomart/wt-dash/releases/latest) and put the `wt-dash` executable in a folder on your PATH. The macOS binary is not signed or notarized, so macOS blocks a copy downloaded with a browser until you allow it under System Settings → Privacy & Security.
+Without Homebrew, run the install script:
+
+```sh
+curl -fsSL https://wt-dash.rigos.dev/install.sh | sh
+```
+
+It downloads the latest release for your system, checks it against the release's SHA-256 checksum, and puts `wt-dash` in `~/.local/bin`. It doesn't install Worktrunk or edit your shell startup files. When it finishes, it says so if `~/.local/bin` isn't on your PATH, or if Worktrunk's `wt` command is missing. In that case, install Worktrunk with `brew install worktrunk`, `cargo install worktrunk`, or from a [Worktrunk release](https://github.com/max-sixty/worktrunk/releases). To read the [script](site/install.sh) before running it, download it with `curl -fsSLO https://wt-dash.rigos.dev/install.sh`, then run `sh install.sh`.
+
+To install a specific release, set `WT_DASH_VERSION`, such as `0.1.1`. To install into another folder, set `WT_DASH_INSTALL_DIR`. Set them for `sh`, after the pipe:
+
+```sh
+curl -fsSL https://wt-dash.rigos.dev/install.sh | WT_DASH_VERSION=0.1.1 WT_DASH_INSTALL_DIR="$HOME/bin" sh
+```
+
+To install by hand, download the archive for your system from the [latest release](https://github.com/rigomart/wt-dash/releases/latest) and put the `wt-dash` executable in a folder on your PATH. The macOS binary is not signed or notarized, so macOS blocks a copy downloaded with a browser until you allow it under System Settings → Privacy & Security. The install script downloads with curl, which doesn't mark the file for that check, so its copy isn't blocked.
 
 <details>
-<summary>Linux without Homebrew, step by step</summary>
+<summary>Installing by hand on Linux, step by step</summary>
 
 1. Install Worktrunk with `cargo install worktrunk`, with `sudo pacman -S worktrunk` on Arch Linux, or from a [Worktrunk release](https://github.com/max-sixty/worktrunk/releases).
 2. Download the archive for your processor from the [latest release](https://github.com/rigomart/wt-dash/releases/latest): `linux-x64` if `uname -m` prints `x86_64`, `linux-arm64` if it prints `aarch64`.
