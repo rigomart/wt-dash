@@ -13,6 +13,10 @@ test("the assembled landing page finds every file it links to", async () => {
 
     const html = await readFile(join(out, "index.html"), "utf8");
     expect(html).toContain("brew install rigomart/tap/wt-dash");
+    expect(html).toContain("curl -fsSL https://wt-dash.rigos.dev/install.sh | sh");
+    expect(await readFile(join(out, "install.sh"), "utf8")).toBe(
+      await readFile(resolve(import.meta.dir, "../site/install.sh"), "utf8"),
+    );
 
     const local = [...html.matchAll(/(?:src|href)="([^"#:]+)"/g)].map((match) => match[1]!);
     expect(local).toContain("images/projects.png");
