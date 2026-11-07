@@ -16,7 +16,7 @@ Worktree folders that no repository knows are listed under an "Orphaned folders"
 
 ## Checks
 
-1. The sidebar ends with `Orphaned folders 2` (no FREE cell) and reads `All projects 18`; the live `lib` worktree is not listed anywhere (search `lib` finds nothing).
+1. The sidebar ends with `Orphaned folders 2` (no FREE cell) and reads `All projects 24`; the live `lib` worktree is not listed anywhere (search `lib` finds nothing).
 2. Focused, the entry's card reads `Orphaned folders`, `2 folders no repo knows`, `up to 2.9 MB`, `Codex 2`, `largest 2.9 MB · abcd/app`, and line 1 reads `wt-dash › Orphaned folders` with `2 orphaned folders · up to 2.9 MB`.
 3. Its list shows `○ ORPHANED  2 orphaned folders · 2.9 MB · no repository knows it`, then `□ abcd/app  repository gone  Its repository at ~/old/app …  ?  2.9 MB` and `□ ef01  no worktree inside  Codex left this folder be…  ?  0 KB`. Tabs read `All 2  Safe 0  Review 0  Busy 0  Broken 0  Orphaned 2`; the header escape before `○ ORPHANED` is `38;5;5` (magenta).
 4. The strip for `abcd/app` reads `abcd/app  ● Orphaned · repository gone`, `~/.codex/worktrees/abcd/app`, `Its repository at ~/old/app no longer exists.`, `Codex · 2.9 MB · measured …`; `i` shows `PATH`, `CREATED BY    Codex` and `SIZE`, and no LAST COMMIT, CHANGES, UPSTREAM or files.

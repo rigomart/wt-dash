@@ -13,13 +13,14 @@ A project's rows are grouped into Safe, Review, Busy and Broken sections. Each r
 ## Checks
 
 1. In `api`, section headers read `✓ SAFE  3 worktrees and 1 branch · 12.1 MB · can go` and `? REVIEW  4 worktrees and 1 branch · 148 KB · needs a look`.
-2. Every seeded row appears once, in the section of its seeded verdict, with its seeded status. Compare each row on "All projects" (18 rows) against `seed`.
+2. Every seeded row appears once, in the section of its seeded verdict, with its seeded status. Compare each row on "All projects" (25 rows) against `seed`, once line 1 no longer reads `checking GitHub`: until then the `worker` rows read as `seed` → `github.gitOnly` (see [pull-requests.md](pull-requests.md)).
 3. The reason column is the seeded reason without its final period, cut with `…` when narrow: `feature/login` shows `Its commits are already in main`; a locked row shows its lock reason only (`agent session`, `no reason given`).
 4. Agent marks: `api › agent/refactor` is Review with `An agent was working here <age>` (a mark under a day old); `api › agent/old-session` is Safe (its mark is 3 days old).
 5. Fresh worktree: `api › feature/new-endpoint` is Review, `no new commits`, `Created <age>, so it may s…`.
 6. `web` shows `‖ BUSY  1 worktree · 28 KB · finish the Git operation first` and `✗ BROKEN  1 worktree · 0 KB · folder missing; prune the record`, the Broken row with age `?` and size `…`.
 7. Blocked rows (`feature/locked`, `docs/locked-bare`, `feature/rebase`, `docs/conflict`, `feature/gone`) show `–` instead of `□`.
 8. Section colors, read with `capture-pane -p -e`: the header escape before `✓ SAFE` is `38;5;2` (green), `? REVIEW` `38;5;3`, `‖ BUSY` `38;5;4`, `✗ BROKEN` `38;5;1`. How they look is checked by eye on a PR image.
+9. Once GitHub has answered, `worker` shows `✓ SAFE  4 worktrees and 1 branch · 72 KB · can go`, every row in it with status `merged on GitHub`, and `? REVIEW  2 worktrees · 64 KB · needs a look`. The GitHub check itself is in [pull-requests.md](pull-requests.md).
 
 ## Traps
 
