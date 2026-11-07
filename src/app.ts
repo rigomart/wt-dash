@@ -26,6 +26,8 @@ export async function createServices(options: {
   readCreated?: (worktree: string) => Promise<string | null>;
   /** Saves each scan's repositories to `file`, and with `listed` (a run without folders) lists the saved ones too. */
   savedRepos?: { file: string; listed: boolean };
+  /** Whether to ask GitHub, through the `gh` at `ghPath` (null when not found), if a merged pull request contains a commit. */
+  github?: { offline: boolean; ghPath: string | null };
 }): Promise<Services> {
   const { home, sources, depth, wtPath, runner, readCreated, savedRepos } = options;
   const cache = join(home, ".cache/wt-dash");

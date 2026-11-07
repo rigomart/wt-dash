@@ -131,7 +131,10 @@ export async function prepareStartup(
     throw new Error(
       `Worktrunk 0.80.0 or newer is required; found ${wtVersion} at ${wtPath}.\nUpdate it with: brew upgrade worktrunk, or cargo install worktrunk`,
     );
-  return { sources, wtPath, gitVersion, wtVersion };
+  // A missing gh is not an error: the check that uses it is skipped. It is only looked for, never run,
+  // because even `gh auth status` contacts GitHub.
+  const ghPath = Bun.which("gh", { PATH: path });
+  return { sources, wtPath, gitVersion, wtVersion, ghPath };
 }
 
 /**
