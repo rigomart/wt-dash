@@ -23,11 +23,21 @@ import type { RenderContext } from "./layout";
 import { toastLine } from "./chrome";
 import { repoCell, rowSize } from "./list";
 
-function names(entries: RemovalEntry[]): string {
-  const labels = entries.map((entry) => branchLabel(entry.row));
+function names(
+  entries: RemovalEntry[],
+  label: (entry: RemovalEntry) => string = (entry) => branchLabel(entry.row),
+): string {
+  const labels = entries.map(label);
   return labels.length <= 2
     ? labels.join(" and ")
     : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
+}
+
+function provenNote(proven: RemovalEntry[]): string {
+  if (proven.length === 1)
+    return `Deletes branch ${names(proven)}: merged on GitHub as PR #${proven[0]!.branchProof!.pr}`;
+  const label = (entry: RemovalEntry) => `${branchLabel(entry.row)} (PR #${entry.branchProof!.pr})`;
+  return `Deletes ${proven.length} branches merged on GitHub: ${names(proven, label)}`;
 }
 
 function ignoredNote(entries: RemovalEntry[]): string {
@@ -146,6 +156,7 @@ function removeDialog(
     );
   const unmerged = ready.filter((entry) => entry.branchWillBeRetained);
   const merged = ready.filter((entry) => entry.row.branch !== null && !entry.branchWillBeRetained);
+  const proven = merged.filter((entry) => entry.branchProof);
   const bare = unmerged.filter((entry) => entry.row.kind === "branch");
   if (bare.length && !confirm.deleteUnmerged)
     notes.push(...warn(`! Skips ${names(bare)} unless you press D: not merged, and no worktree`));
@@ -159,7 +170,8 @@ function removeDialog(
       key(theme, "D"),
       dim(confirm.deleteUnmerged ? " keep them" : " delete too"),
     ]);
-  } else if (merged.length) options.push([dim("Merged branches are deleted.")]);
+  } else if (merged.length > proven.length) options.push([dim("Merged branches are deleted.")]);
+  if (proven.length) options.push(...wrap(provenNote(proven), inner).map((text) => [dim(text)]));
   const hasProcessesToStop = orphans.length < ready.length;
   if (hasProcessesToStop)
     options.push([

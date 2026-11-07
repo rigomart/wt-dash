@@ -215,7 +215,7 @@ wt-dash names the tool that made each worktree from the folder it sits in. The t
 
 The dialog lists each row and its size, the total, and which ones would lose uncommitted or untracked changes or ignored files that aren't caches, such as `.env.local`.
 
-- **Branches are kept unless they are merged.** Press `D` in the dialog to delete unmerged branches too. An unmerged branch without a worktree is skipped unless you press `D`, since deleting it is all its removal does.
+- **Branches are kept unless they are merged.** A branch proven merged by a GitHub pull request is deleted like a merged branch, and the dialog names the pull request. Press `D` in the dialog to delete unmerged branches too. An unmerged branch without a worktree is skipped unless you press `D`, since deleting it is all its removal does.
 - **Processes running inside are stopped**, such as dev servers, watchers and language servers, so they don't hold the folder open. The dialog names the worktrees that have some, such as `Running in feature/login: 1 process · :3000`. Worktrunk leaves interactive shells and terminal editors alone. Press `e` in the dialog to leave every process running.
 - **Ignored files go with the worktree**, including `.env` copies, local databases and caches, the same way Worktrunk treats them.
 - **Worktrunk hooks are skipped.** Project-defined cleanup commands do not run.
