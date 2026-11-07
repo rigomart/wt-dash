@@ -7,7 +7,7 @@ import type {
   WorktreeFacts,
   WorktreeRow,
 } from "../types";
-import { assess } from "../assess";
+import { assessRow } from "../assess";
 
 /** `wt list` arguments for a repo's worktrees and, unless `branches` is false, its local branches without one. */
 export function listArgs(repo: string, branches = true): string[] {
@@ -184,8 +184,7 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
       prunable: object(worktree?.prunable) !== null,
       operation: string(worktree?.operation),
     };
-    const { verdict, reason } = assess(facts);
-    rows.push({ ...facts, sizeKiB: null, sizeMeasuredAt: null, verdict, reason });
+    rows.push(assessRow({ ...facts, sizeKiB: null, sizeMeasuredAt: null }));
   }
   return rows;
 }

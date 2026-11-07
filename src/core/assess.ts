@@ -1,4 +1,12 @@
-import type { OrphanCause, Verdict, WorktreeFacts } from "./types";
+import type {
+  ForgeCheck,
+  ForgeProofKind,
+  ForgeUncheckedReason,
+  OrphanCause,
+  Verdict,
+  WorktreeFacts,
+  WorktreeRow,
+} from "./types";
 
 export interface Assessment {
   /** A few words for the STATUS column. */
@@ -65,6 +73,59 @@ export function markerNote(facts: WorktreeFacts, now = Date.now()): string | nul
   const age = markAge(facts, now);
   if (agentMarkers[facts.marker]) return `Agent mark from ${ago(age ?? 0)}, likely stale.`;
   return age === null ? `Marked ${facts.marker}.` : `Marked ${facts.marker} ${ago(age)}.`;
+}
+
+const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Oct 30" in local time, with the year when it isn't the current one; null when the time can't be read. */
+function dayLabel(iso: string, now: number): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = `${months[date.getMonth()]} ${date.getDate()}`;
+  return date.getFullYear() === new Date(now).getFullYear() ? day : `${day}, ${date.getFullYear()}`;
+}
+
+function prMerged(pr: number, mergedAt: string, now: number): string {
+  const day = dayLabel(mergedAt, now);
+  return day ? `PR #${pr} merged ${day}` : `PR #${pr} merged`;
+}
+
+const provenEndings: Record<ForgeProofKind, string> = {
+  commit: " with this exact commit.",
+  tree: " with the same files.",
+  stacked: " and brought in this commit from a stacked pull request.",
+};
+
+const uncheckedNotes: Record<ForgeUncheckedReason, string | null> = {
+  offline: "Not checked against GitHub: offline.",
+  "gh-missing": "Not checked against GitHub: gh isn't installed.",
+  "signed-out": "Not checked against GitHub: gh isn't signed in.",
+  // A repository that isn't on GitHub was never going to be checked, so its rows read as before.
+  "no-github-remote": null,
+  failed: "Not checked against GitHub: GitHub didn't answer.",
+};
+
+/** The row's forge check, or null when it has none or it answers for a commit that is no longer the tip. */
+function currentForge(facts: WorktreeFacts): ForgeCheck | null {
+  const forge = facts.forge;
+  if (!forge) return null;
+  if ((forge.kind === "proven" || forge.kind === "not-found") && forge.tip !== facts.headSha)
+    return null;
+  return forge;
+}
+
+/** The sentence an unproven forge check adds to a Review reason, or null when it adds none. */
+function forgeNote(forge: Exclude<ForgeCheck, { kind: "proven" }>, now: number): string | null {
+  switch (forge.kind) {
+    case "pending":
+      return "Checking GitHub…";
+    case "unchecked":
+      return uncheckedNotes[forge.why];
+    case "not-found":
+      return forge.samePr
+        ? `${prMerged(forge.samePr.number, forge.samePr.mergedAt, now)} without this commit.`
+        : "No merged pull request on GitHub has this commit.";
+  }
 }
 
 /** One authority for Git status, verdict, explanation, and removal eligibility. A recent agent mark turns Safe into Review. */
@@ -173,6 +234,19 @@ function assessGit(facts: WorktreeFacts, now: number): Assessment {
       return result(status, "Review", `Created ${ago(age)}, so it may still be in use.`);
     return result(status, "Safe", reason);
   };
+  // Squash merges often hide a merge from Worktrunk; a merged pull request holding the tip proves it.
+  const unmerged = (status: string, reason: string): Assessment => {
+    const forge = currentForge(facts);
+    if (forge?.kind === "proven") {
+      const proof = prMerged(forge.pr, forge.mergedAt, now) + provenEndings[forge.by];
+      // Like Worktrunk's squash-merge proofs, a worktree is Safe at once and a branch without one waits a day.
+      return facts.kind === "branch"
+        ? safeOnceDayOld("merged on GitHub", proof)
+        : result("merged on GitHub", "Safe", proof);
+    }
+    const note = forge && forgeNote(forge, now);
+    return result(status, "Review", note ? `${reason} ${note}` : reason);
+  };
   switch (state) {
     case "integrated": {
       if (facts.integrationReason === "same_commit")
@@ -191,23 +265,20 @@ function assessGit(facts: WorktreeFacts, now: number): Assessment {
     case "empty":
       return safeOnceDayOld("no new commits", `No commits beyond ${base}.`);
     case "ahead":
-      return result("unmerged commits", "Review", `${commitsArent(facts.mainAhead)} in ${base}.`);
+      return unmerged("unmerged commits", `${commitsArent(facts.mainAhead)} in ${base}.`);
     case "would_conflict":
-      return result(
+      return unmerged(
         "unmerged commits",
-        "Review",
         `${commitsArent(facts.mainAhead)} in ${base}, and merging would conflict.`,
       );
     case "diverged":
-      return result(
+      return unmerged(
         "unmerged commits",
-        "Review",
         `${commitsArent(facts.mainAhead)} in ${base}, which has also moved on.`,
       );
     case "behind":
-      return result(
+      return unmerged(
         "behind main",
-        "Review",
         `${base} has moved ahead, and Worktrunk didn't confirm this branch is in it.`,
       );
     case "orphan":
@@ -231,6 +302,15 @@ function assessOrphan(cause: OrphanCause): Assessment {
   return cause.repoExists
     ? orphaned("unknown to its repo", `Its repository at ${cause.repo} no longer lists it.`)
     : orphaned("repository gone", `Its repository at ${cause.repo} no longer exists.`);
+}
+
+/** The row with its verdict and reason recomputed from its facts. */
+export function assessRow<T extends WorktreeFacts>(
+  row: T,
+  now = Date.now(),
+): T & Pick<WorktreeRow, "verdict" | "reason"> {
+  const { verdict, reason } = assess(row, now);
+  return { ...row, verdict, reason };
 }
 
 export function removalBlockReason(row: WorktreeFacts): string | null {

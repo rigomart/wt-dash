@@ -1,4 +1,4 @@
-import { assess } from "../assess";
+import { assessRow } from "../assess";
 import { readBranchCreatedAt, readComparisonBase, readDescriptions } from "../git/refs";
 import type { CommandRunner, WorktreeRow } from "../types";
 import { readMarks } from "../worktrunk/list";
@@ -41,15 +41,13 @@ export async function enrichRows(
     // Worktrunk's JSON carries the marker only for worktrees; its state in Git config has it for every branch.
     const mark = row.branch ? marks.get(row.branch) : undefined;
     const marker = row.marker ?? mark?.marker ?? null;
-    const enriched: WorktreeRow = {
+    return assessRow({
       ...row,
       mainBase: base,
       createdAt: created[index]!,
       marker,
       markerSetAt: mark && mark.marker === marker ? mark.setAt : null,
       description: (row.branch && descriptions.get(row.branch)) ?? null,
-    };
-    const assessment = assess(enriched);
-    return { ...enriched, verdict: assessment.verdict, reason: assessment.reason };
+    });
   });
 }
