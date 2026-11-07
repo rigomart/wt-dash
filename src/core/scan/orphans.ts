@@ -1,6 +1,6 @@
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { assess } from "../assess";
+import { assessRow } from "../assess";
 import { ORPHANS, type OrphanCause, type WorktreeFacts, type WorktreeRow } from "../types";
 import { toolForPath } from "../worktrunk/list";
 import type { LinkedWorktrees } from "./discovery";
@@ -159,8 +159,7 @@ export function orphanRow({ path, cause }: Orphan): WorktreeRow {
     operation: null,
     orphan: cause,
   };
-  const { verdict, reason } = assess(facts);
-  return { ...facts, sizeKiB: null, sizeMeasuredAt: null, verdict, reason };
+  return assessRow({ ...facts, sizeKiB: null, sizeMeasuredAt: null });
 }
 
 export function sameCause(a: OrphanCause | null | undefined, b: OrphanCause | null | undefined) {
