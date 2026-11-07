@@ -99,6 +99,24 @@ export async function readTips(
   return new Map(unique.map((ref, index) => [ref, tips[index]!]));
 }
 
+/** Each commit's tree, from one `git rev-parse`; empty when Git can't read every one of them. */
+export async function readTrees(
+  repo: string,
+  commits: string[],
+  runner: CommandRunner,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  if (!commits.length) return new Map();
+  const result = await runner(
+    "git",
+    ["-C", repo, "rev-parse", ...commits.map((commit) => `${commit}^{tree}`)],
+    signal,
+  );
+  const trees = result.stdout.trim().split("\n");
+  if (result.exitCode !== 0 || trees.length !== commits.length) return new Map();
+  return new Map(commits.map((commit, index) => [commit, trees[index]!]));
+}
+
 /**
  * When a branch without a worktree was created, the way `wt step prune` judges its age: its oldest reflog
  * entry, or else when Git last wrote its ref. Null when neither can be read, as in a reftable repository.

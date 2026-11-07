@@ -2,7 +2,12 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readBranchCreatedAt, readComparisonBase, readTips } from "../../src/core/git/refs";
+import {
+  readBranchCreatedAt,
+  readComparisonBase,
+  readTips,
+  readTrees,
+} from "../../src/core/git/refs";
 import type { CommandRunner } from "../../src/core/types";
 const ok = (stdout = "") => ({ stdout, stderr: "", exitCode: 0 });
 test.each([
@@ -100,6 +105,21 @@ test("reference batches preserve missing refs, revision expressions and Git fail
   await expect(readTips(join(directory, "absent"), ["HEAD"], runner)).rejects.toThrow(
     "git rev-parse exited",
   );
+});
+
+test("trees come from one rev-parse, and none when any commit can't be read", async () => {
+  const sha = await git("rev-parse", "HEAD");
+  const tree = await git("rev-parse", "HEAD^{tree}");
+  let commands = 0;
+  const counted: CommandRunner = (command, args) => {
+    commands++;
+    return runner(command, args);
+  };
+  expect([...(await readTrees(repo, [sha], counted))]).toEqual([[sha, tree]]);
+  expect(commands).toBe(1);
+  expect(await readTrees(repo, [sha, "0".repeat(40)], runner)).toEqual(new Map());
+  expect(await readTrees(repo, [], counted)).toEqual(new Map());
+  expect(commands).toBe(1);
 });
 
 test("a branch's age comes from its oldest reflog entry, else when its ref was written", async () => {

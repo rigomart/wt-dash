@@ -61,6 +61,20 @@ export type ForgeUncheckedReason =
  */
 export type ForgeProofKind = "commit" | "tree" | "stacked";
 
+/** A merged pull request that holds the tip. */
+export interface ForgeProof {
+  kind: "proven";
+  /** The 40-hex commit GitHub was asked about. */
+  tip: string;
+  /** The pull request merged into the default branch. */
+  pr: number;
+  /** When PR `pr` was merged, as an ISO 8601 time. */
+  mergedAt: string;
+  /** The branch PR `pr` merged into. */
+  base: string;
+  by: ForgeProofKind;
+}
+
 /**
  * What GitHub says about whether the row's tip reached the default branch through a merged pull request.
  * A `proven` or `not-found` answer counts only while its `tip` is still the row's `headSha`.
@@ -68,18 +82,7 @@ export type ForgeProofKind = "commit" | "tree" | "stacked";
 export type ForgeCheck =
   | { kind: "pending" }
   | { kind: "unchecked"; why: ForgeUncheckedReason }
-  | {
-      kind: "proven";
-      /** The 40-hex commit GitHub was asked about. */
-      tip: string;
-      /** The pull request merged into the default branch. */
-      pr: number;
-      /** When PR `pr` was merged, as an ISO 8601 time. */
-      mergedAt: string;
-      /** The branch PR `pr` merged into. */
-      base: string;
-      by: ForgeProofKind;
-    }
+  | ForgeProof
   | {
       kind: "not-found";
       tip: string;
@@ -109,6 +112,8 @@ export interface WorktreeFacts {
   tool: ToolName;
   changes: ChangeFlags | null;
   upstreamAhead: number | null;
+  /** The name of the upstream branch on its remote, which may differ from `branch`; null without one. */
+  upstreamBranch?: string | null;
   mainState: string | null;
   integrationReason?: string | null;
   lockReason: string | null;

@@ -11,6 +11,7 @@ import {
   createSandbox,
   type Built,
   type FollowUp,
+  type GitHubOptions,
   type SavedRepos,
   type Sandbox,
   type Services,
@@ -68,7 +69,7 @@ const matches = (frame: string, match: FrameMatch): boolean =>
 
 /**
  * Starts the real runTerminal on the sandbox's real services, in an OpenTUI test renderer. `sources` replaces the
- * scan root, as from prepareStartup. `followUp` is the dashboard's, as in `Sandbox.services`.
+ * scan root, as from prepareStartup. `github` and `followUp` are the app's, as in `Sandbox.services`.
  */
 export async function startApp(
   sandbox: Sandbox,
@@ -78,6 +79,7 @@ export async function startApp(
     runner,
     sources,
     savedRepos,
+    github,
     followUp,
   }: {
     width: number;
@@ -85,10 +87,11 @@ export async function startApp(
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    github?: GitHubOptions;
     followUp?: FollowUp;
   },
 ): Promise<App> {
-  const services = await sandbox.services({ runner, sources, savedRepos, followUp });
+  const services = await sandbox.services({ runner, sources, savedRepos, github, followUp });
   const setup = await createTestRenderer({ width, height });
   const running = runTerminal(services.dashboard, {
     renderer: setup.renderer,
@@ -230,6 +233,7 @@ export async function withApp(
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    github?: GitHubOptions;
     followUp?: FollowUp;
     name: string;
   },

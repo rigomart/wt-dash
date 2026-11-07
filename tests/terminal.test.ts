@@ -472,6 +472,21 @@ for (const activity of ["scanning", "sizing", "toast"] as const) {
   });
 }
 
+test("the header says GitHub is being checked while a follow-up runs, beside the sizing count", async () => {
+  const item = row("api", 2000, { sizeKiB: null, sizeMeasuredAt: null });
+  const ui = await start(130, 20, [item]);
+  try {
+    ui.fake.update({ checking: 2, sizing: [item.path!] });
+    let header = (await ui.frame()).split("\n")[0]!;
+    expect(header).toContain("1 sizing · checking GitHub · scanned ");
+    ui.fake.update({ checking: 0, sizing: [] });
+    header = (await ui.frame()).split("\n")[0]!;
+    expect(header).not.toContain("checking GitHub");
+  } finally {
+    await ui.stop();
+  }
+});
+
 test("focus changes restart the file debounce, including a quick return to the same row (audit #4)", async () => {
   const inspected: string[] = [];
   const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {

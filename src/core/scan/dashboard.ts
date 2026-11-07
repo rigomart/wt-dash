@@ -27,6 +27,16 @@ export interface RowPatch {
   facts: Partial<Omit<WorktreeFacts, "id" | "kind" | "repoPath" | "path" | "headSha">>;
 }
 
+/**
+ * Runs once per scan after each repository's full listing, without holding the scan up, and patches its rows
+ * when it resolves. It gets the rows as listed, earlier patches applied; if it fails, they keep their facts.
+ */
+export type FollowUp = (
+  repo: string,
+  rows: WorktreeRow[],
+  signal: AbortSignal,
+) => Promise<RowPatch[]>;
+
 interface DashboardOptions {
   projectRoot: string;
   wtPath: string;
@@ -45,11 +55,7 @@ interface DashboardOptions {
     paths: string[],
     signal: AbortSignal,
   ) => Promise<Record<string, RunningProcess[]>>;
-  /**
-   * Runs once per scan after each repository's full listing, without holding the scan up, and patches its rows
-   * when it resolves. It gets the rows as listed, earlier patches applied; if it fails, they keep their facts.
-   */
-  followUp?: (repo: string, rows: WorktreeRow[], signal: AbortSignal) => Promise<RowPatch[]>;
+  followUp?: FollowUp;
 }
 
 export function createDashboardService(options: DashboardOptions): DashboardService {

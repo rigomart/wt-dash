@@ -54,11 +54,11 @@ export function statusLine(state: UiState, ctx: RenderContext): Line {
   return bannerLine(ctx) ?? [];
 }
 
-type SummaryPart = "projects" | "worktrees" | "size" | "sizing";
+type SummaryPart = "projects" | "worktrees" | "size" | "sizing" | "checking";
 
 const SUMMARY_PARTS_BY_WIDTH: SummaryPart[][] = [
-  ["projects", "worktrees", "size", "sizing"],
-  ["worktrees", "size", "sizing"],
+  ["projects", "worktrees", "size", "sizing", "checking"],
+  ["worktrees", "size", "sizing", "checking"],
   ["worktrees", "size"],
   ["size"],
   [],
@@ -99,6 +99,7 @@ export function headerLine(
     worktrees: rowsLabel(rows),
     size: `up to ${sizeLabel(total)}`,
     sizing: unknown ? `${unknown} sizing` : "",
+    checking: snapshot.checking ? "checking GitHub" : "",
   };
   const summary = (names: SummaryPart[]): Line => {
     const listing = !rows.length && progress.phase === "scanning";

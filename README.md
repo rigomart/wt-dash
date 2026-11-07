@@ -147,7 +147,7 @@ Everywhere, `r` rescans every repository, `?` shows every key, and `q` or `ctrl+
 
 | Verdict      | Status                                                                                                                                                       | Removal                             |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
-| **Safe**     | no new commits, merged                                                                                                                                       | Allowed                             |
+| **Safe**     | no new commits, merged, merged on GitHub                                                                                                                     | Allowed                             |
 | **Review**   | uncommitted changes, unpushed commits, unmerged commits, behind main, unrelated history; no new commits, under a day old; an agent marked it in the last day | Allowed after you read the warning  |
 | **Review**   | locked, status unknown                                                                                                                                       | Blocked                             |
 | **Busy**     | rebase, merge, or cherry-pick in progress; unresolved conflicts                                                                                              | Blocked                             |
@@ -165,9 +165,13 @@ wt-dash also reads agent marks. Worktrunk's agent plugins, such as the one `wt c
 
 Running processes don't change a verdict. After each scan the strip shows the processes whose working directory is inside a worktree, with the TCP ports they listen on, such as `2 processes · :3000 :5173`, and `i` lists each one's command. A process that holds a terminal, such as a shell or a terminal editor, reads `zsh (terminal)`. The remove dialog names the worktrees that have one.
 
-wt-dash does not check pull request status.
-
 </details>
+
+### Pull requests merged on GitHub
+
+A squash merge on GitHub puts a branch's work into the default branch as a new commit, so Git often can't tell the branch is merged, and the row stays Review with unmerged commits. For these rows only, wt-dash asks GitHub through your own `gh` whether a merged pull request holds the branch's last commit, or a commit with exactly the same files. If one does, the row is Safe with a reason such as "PR #42 merged Oct 30 with this exact commit". A branch without a worktree still waits until it is a day old. If none does, the row stays Review, and the reason says what GitHub found, such as "PR #42 merged Oct 30 without this commit", or why GitHub wasn't asked.
+
+GitHub is asked only about clean worktrees and branches whose commits are all pushed and that Git can't show merged, and only in a repository whose default branch tracks a github.com remote (or, tracking none, whose `origin` is on github.com). For each such repository, a scan sends one read-only GraphQL query with `gh api graphql`, holding the repository's owner and name and those rows' commit IDs and branch names. A second query follows only when a pull request was merged into another branch first. The header reads "checking GitHub" while it waits. A merged pull request never changes, so each proof is kept in `~/.cache/wt-dash/pull-requests.json` and its commit isn't asked about again. Run with `--offline` to never ask; rows GitHub could settle then say they weren't checked.
 
 ### Orphaned folders
 
@@ -245,6 +249,7 @@ wt-dash --doctor         # check Git, Worktrunk and folder access without openin
 | ---------------------------------- | --------------------------------------------------------- |
 | `--depth <n>`                      | Folder levels to search below each root, 0–20 (default 2) |
 | `--wt-path <path>`                 | Use a specific Worktrunk executable                       |
+| `--offline`                        | Never ask GitHub about merged pull requests               |
 | `--doctor`                         | Check the setup and exit                                  |
 | `-h`, `--help` / `-v`, `--version` | Show help or the version                                  |
 
@@ -272,7 +277,7 @@ Projects with the most worktrees come first, each with how much space its Safe w
 ### Good to know
 
 - Sizes come from `du` and are cached in `~/.cache/wt-dash/sizes.json`. A worktree is measured again when its saved size is more than a day old, or when files were added or removed at the top level of the worktree or its `node_modules` folder. Press `R` to remeasure the focused worktree. Totals read "up to" because disk blocks shared between files can make `du` overstate the space you get back.
-- wt-dash runs Git and Worktrunk locally. It makes no network requests of its own and never changes your Worktrunk settings.
+- wt-dash runs Git and Worktrunk locally and never changes your Worktrunk settings. It reaches the network only to ask GitHub about [merged pull requests](#pull-requests-merged-on-github), through your own `gh`.
 
 ## Contributing
 
