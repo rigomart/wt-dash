@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/rigomart/wt-dash/compare/v0.1.1...v0.2.0) (2026-11-07)
+
+
+### Features
+
+* add a curl install script ([#71](https://github.com/rigomart/wt-dash/issues/71)) ([cfc169e](https://github.com/rigomart/wt-dash/commit/cfc169e4d480ea24cd05596a7b88dc7b83c3060e))
+* prove squash-merged branches through their GitHub pull requests ([#73](https://github.com/rigomart/wt-dash/issues/73)) ([fb18a21](https://github.com/rigomart/wt-dash/commit/fb18a2115903db2d295f2624b40a6a3a68455cef))
+
 ## [0.1.1](https://github.com/rigomart/wt-dash/compare/v0.1.0...v0.1.1) (2026-10-31)
 
 
