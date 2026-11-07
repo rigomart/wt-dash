@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import { createCacheFile } from "./cache-file";
 import type { CommandRunner, SizeEntry, SizeService, SizeSignature } from "./types";
 
 /** A saved size older than this is measured again even when its folders look unchanged. */
@@ -36,6 +37,29 @@ function parseSignature(raw: unknown): SizeSignature | undefined {
   return { mtimeMs: mtimeMs as number, nodeModulesMtimeMs: nodeModulesMtimeMs as number | null };
 }
 
+function parseEntries(parsed: unknown): Map<string, SizeEntry> {
+  const entries = new Map<string, SizeEntry>();
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return entries;
+  for (const [path, raw] of Object.entries(parsed)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    if (
+      Number.isSafeInteger(entry.sizeKiB) &&
+      (entry.sizeKiB as number) >= 0 &&
+      typeof entry.measuredAt === "string"
+    ) {
+      const loaded: SizeEntry = {
+        sizeKiB: entry.sizeKiB as number,
+        measuredAt: entry.measuredAt,
+      };
+      const signature = parseSignature(entry.signature);
+      if (signature) loaded.signature = signature;
+      entries.set(path, loaded);
+    }
+  }
+  return entries;
+}
+
 export function createSizeService(
   cachePath: string,
   runner: CommandRunner,
@@ -50,12 +74,14 @@ export function createSizeService(
   const inFlight = new Map<string, Promise<SizeEntry | null>>();
   const newestByPath = new Map<string, number>();
   const abort = new AbortController();
+  const file = createCacheFile<Map<string, SizeEntry>>(cachePath, {
+    parse: parseEntries,
+    serialize: (entries) => Object.fromEntries(entries),
+    empty: () => new Map(),
+  });
   let requests = 0;
   let active = 0;
   let closed = false;
-  let writeNumber = 0;
-  let dirty = false;
-  let writes: Promise<void> | null = null;
 
   async function acquire(hadEntry: boolean, first: boolean): Promise<boolean> {
     if (closed) return false;
@@ -77,27 +103,6 @@ export function createSizeService(
     const next = firstWaiters.shift() ?? uncachedWaiters.shift() ?? cachedWaiters.shift();
     if (next) next();
     else active--;
-  }
-
-  function persist(): Promise<void> {
-    dirty = true;
-    writes ??= Promise.resolve().then(async () => {
-      try {
-        while (dirty) {
-          dirty = false;
-          try {
-            await mkdir(dirname(cachePath), { recursive: true });
-            const temporary = `${cachePath}.tmp-${process.pid}-${++writeNumber}`;
-            dirty = false;
-            await writeFile(temporary, JSON.stringify(Object.fromEntries(cache), null, 2));
-            await rename(temporary, cachePath);
-          } catch {}
-        }
-      } finally {
-        writes = null;
-      }
-    });
-    return writes;
   }
 
   async function isFresh(path: string): Promise<boolean> {
@@ -130,7 +135,7 @@ export function createSizeService(
       const entry: SizeEntry = { sizeKiB, measuredAt: new Date(now()).toISOString() };
       if (signature) entry.signature = signature;
       cache.set(path, entry);
-      saved = persist();
+      saved = file.save(cache);
       measured = entry;
     } catch {
       return null;
@@ -150,29 +155,7 @@ export function createSizeService(
   return {
     async load() {
       cache.clear();
-      try {
-        const parsed = JSON.parse(await readFile(cachePath, "utf8")) as unknown;
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
-        for (const [path, raw] of Object.entries(parsed)) {
-          if (typeof raw !== "object" || raw === null) continue;
-          const entry = raw as Record<string, unknown>;
-          if (
-            Number.isSafeInteger(entry.sizeKiB) &&
-            (entry.sizeKiB as number) >= 0 &&
-            typeof entry.measuredAt === "string"
-          ) {
-            const loaded: SizeEntry = {
-              sizeKiB: entry.sizeKiB as number,
-              measuredAt: entry.measuredAt,
-            };
-            const signature = parseSignature(entry.signature);
-            if (signature) loaded.signature = signature;
-            cache.set(path, loaded);
-          }
-        }
-      } catch {
-        // Missing and corrupt cache files both mean there is no saved size.
-      }
+      for (const [path, entry] of await file.load()) cache.set(path, entry);
     },
     get(path) {
       return cache.get(path) ?? null;
@@ -202,7 +185,7 @@ export function createSizeService(
       ])
         resume();
       await Promise.allSettled(tasks);
-      await writes;
+      await file.flush();
     },
   };
 }
