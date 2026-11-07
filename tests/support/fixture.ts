@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { createServices } from "../../src/app";
 import type { ActionService } from "../../src/core/removal/types";
-import { discoverRepos, readCreatedAt, type RepoSource } from "../../src/core/scan/discovery";
+import { findProcesses } from "../../src/core/processes";
+import { createDashboardService } from "../../src/core/scan/dashboard";
+import {
+  discoverRepos,
+  findRepos,
+  readCreatedAt,
+  type RepoSource,
+} from "../../src/core/scan/discovery";
+import { findOrphans } from "../../src/core/scan/orphans";
 import type {
   CommandResult,
   CommandRunner,
@@ -53,6 +61,8 @@ export interface ExecOptions {
 }
 
 export type SavedRepos = NonNullable<Parameters<typeof createServices>[0]["savedRepos"]>;
+/** The dashboard's per-repository follow-up, such as the check that asks GitHub about each row's tip. */
+export type FollowUp = NonNullable<Parameters<typeof createDashboardService>[0]["followUp"]>;
 
 export interface Services {
   dashboard: DashboardService;
@@ -136,12 +146,14 @@ export interface Sandbox {
   repo(name: string): Promise<Repo>;
   /**
    * Dashboard, action and size services on the sandbox; `cleanup` closes any still open. `runner` replaces the
-   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root.
+   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root. `followUp`
+   * patches each repository's rows after its listing, as the GitHub check does; saved repos are ignored with it.
    */
   services(options?: {
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    followUp?: FollowUp;
   }): Promise<Services>;
   /** Closes services, removes every worktree of the sandbox's repos, then the sandbox. Safe to call twice. */
   cleanup(): Promise<void>;
@@ -597,21 +609,45 @@ export async function createSandbox(
   }
 
   async function services(
-    options: { runner?: CommandRunner; sources?: RepoSource[]; savedRepos?: SavedRepos } = {},
+    options: {
+      runner?: CommandRunner;
+      sources?: RepoSource[];
+      savedRepos?: SavedRepos;
+      followUp?: FollowUp;
+    } = {},
   ): Promise<Services> {
+    const sources = options.sources ?? [{ kind: "scan", folder: scanRoot }];
+    const commands = options.runner ?? runner;
     const app = await createServices({
       home,
-      sources: options.sources ?? [{ kind: "scan", folder: scanRoot }],
+      sources,
       depth: 2,
       wtPath,
-      runner: options.runner ?? runner,
+      runner: commands,
       readCreated,
       savedRepos: options.savedRepos,
     });
+    // createServices takes no follow-up, so this builds the same dashboard with one, minus saved repos.
+    const dashboard = options.followUp
+      ? createDashboardService({
+          projectRoot: home,
+          wtPath,
+          runner: commands,
+          sizeService: app.sizes,
+          discover: async () =>
+            [...new Set((await findRepos(sources, 2)).flatMap(({ repos }) => repos))].sort(),
+          readCreated,
+          findOrphans: (repos) => findOrphans(home, repos),
+          findProcesses: (paths, signal) => findProcesses(paths, commands, { signal }),
+          followUp: options.followUp,
+        })
+      : app.dashboard;
     const service: Services = {
       ...app,
+      dashboard,
       async close() {
         if (!opened.delete(service)) return;
+        if (dashboard !== app.dashboard) await dashboard.close();
         await app.close();
       },
     };
