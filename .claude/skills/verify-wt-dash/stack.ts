@@ -75,6 +75,8 @@ interface Instance {
   backdatesOnDisk: boolean;
   /** The `--seed` module, or null for the default seed. */
   seedFile?: string | null;
+  /** Extra arguments from `--app-args`, put after the scan root on the app's command line. */
+  appArgs?: string[];
   seed: SeedRow[];
 }
 
@@ -114,6 +116,11 @@ function parseFlags(args: string[]): { flags: Record<string, string | true>; res
       continue;
     }
     const key = arg.slice(2);
+    const equals = key.indexOf("=");
+    if (equals > 0) {
+      flags[key.slice(0, equals)] = key.slice(equals + 1);
+      continue;
+    }
     const next = args[index + 1];
     if (next !== undefined && !next.startsWith("--")) {
       flags[key] = next;
@@ -390,6 +397,7 @@ async function startApp(instance: Instance): Promise<void> {
       process.execPath,
       join(repoRoot, "src", "index.ts"),
       instance.scanRoot,
+      ...(instance.appArgs ?? []),
       // In the config file this option crashes tmux 3.6a's server before the first session exists.
       ";",
       "set-option",
@@ -435,6 +443,15 @@ async function up(flags: Record<string, string | true>) {
       `Instance ${name} was seeded from ${instance.seedFile ?? "the default seed"}.`,
       `Recreate it: bun ${self} down --name ${name} --purge, then up again.`,
     );
+  if (flags["app-args"] === true)
+    throw new Failure(
+      "--app-args needs a value, and a value starting with -- must be joined with =.",
+      "Example: --app-args='--depth 0'",
+    );
+  const appArgs =
+    typeof flags["app-args"] === "string"
+      ? flags["app-args"].split(/\s+/).filter((word) => word !== "")
+      : undefined;
   const variant: Variant = variantFlag ?? instance?.variant ?? "wide";
   let seeded = false;
   if (!instance) {
@@ -473,6 +490,11 @@ async function up(flags: Record<string, string | true>) {
   let resized = false;
   if (info && !info.dead) {
     reused = true;
+    if (appArgs && appArgs.join(" ") !== (instance.appArgs ?? []).join(" "))
+      throw new Failure(
+        `Instance ${name} is running with ${instance.appArgs?.length ? `app arguments ${instance.appArgs.join(" ")}` : "no app arguments"}.`,
+        `Restart it with the new ones: bun ${self} down --name ${name}, then up again.`,
+      );
     if (instance.variant !== variant) {
       const { cols, rows } = VARIANTS[variant];
       tmux(instance.socket, "resize-window", "-t", "app", "-x", String(cols), "-y", String(rows));
@@ -483,17 +505,27 @@ async function up(flags: Record<string, string | true>) {
   } else {
     if (info?.dead) tmux(instance.socket, "kill-server");
     instance.variant = variant;
+    if (appArgs) instance.appArgs = appArgs;
     await startApp(instance);
   }
   const ready = await waitUntilReady(instance.socket, p.appLog);
   const size = paneInfo(instance.socket)?.size;
-  await log(name, { event: "up", reused, resized, seeded, variant, readyMs: ready.ms });
+  await log(name, {
+    event: "up",
+    reused,
+    resized,
+    seeded,
+    variant,
+    appArgs: instance.appArgs ?? [],
+    readyMs: ready.ms,
+  });
   return {
     name,
     reused,
     seeded,
     resized,
     variant,
+    appArgs: instance.appArgs ?? [],
     size,
     branch: instance.branch,
     header: ready.header,
@@ -1042,7 +1074,7 @@ async function list() {
 }
 
 const COMMANDS = {
-  up: "up --name <n> [--variant wide|narrow] [--seed <file>]  Seed if new, start wt-dash in tmux, wait until listed. Reuses a running instance (resizing it to the variant). --seed builds the sandbox with a module's default export (SeedModule) instead of the test fixture's seed.",
+  up: "up --name <n> [--variant wide|narrow] [--seed <file>] [--app-args='<args>']  Seed if new, start wt-dash in tmux, wait until listed. Reuses a running instance (resizing it to the variant). --seed builds the sandbox with a module's default export (SeedModule) instead of the test fixture's seed. --app-args adds space-separated arguments after the scan root, such as --app-args='--depth 0'; join the value with = when it starts with --. A stopped instance restarts with the last ones; a running one with other arguments is refused.",
   env: "env --name <n> [--full]  The shell preamble, tmux commands and paths to drive the instance; --full adds its env and the seeded rows with their expected verdicts.",
   doctor: "doctor --name <n>  Read-only health check.",
   state:

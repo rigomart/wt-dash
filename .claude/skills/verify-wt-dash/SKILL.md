@@ -22,7 +22,7 @@ Every stack command prints one JSON object, `{"ok":true,...}` or `{"ok":false,"e
 An instance is a name (1–24 of `a-z0-9-`; use one per task, such as the branch topic) and everything under `.verify/<name>/` (gitignored):
 
 - `sandbox/`: its own HOME (so its own `~/.cache/wt-dash/sizes.json` and `removals.log`), Git config, Worktrunk config (`WORKTRUNK_CONFIG_PATH` and friends), the scan root `sandbox/projects/` with the seeded repos, and their worktrees in `sandbox/worktrees/`.
-- A tmux server on its own socket, `tmux -L wt-dash-verify-<name>-<checkout hash>`, holding one session, `app`, running `bun src/index.ts sandbox/projects` from this checkout with the instance env. The hash keeps the same name in two checkouts apart; `env` prints the exact socket.
+- A tmux server on its own socket, `tmux -L wt-dash-verify-<name>-<checkout hash>`, holding one session, `app`, running `bun src/index.ts sandbox/projects` from this checkout with the instance env, plus any `up --app-args` (below). The hash keeps the same name in two checkouts apart; `env` prints the exact socket.
 - `logs/` (`app.log` is the app's stderr, `stack.log` every up/down) and `evidence/`.
 
 There are no ports. Two agents in one checkout only need different names. Never drive the developer's own wt-dash, `~/projects` or `~/.cache/wt-dash`, and never drive an instance you did not start: `list` shows what exists. `up` refuses an instance started on another branch; recreate it with `down --purge` then `up`.
@@ -54,6 +54,8 @@ There are no users. The data is the seed, built by `tests/support/fixture.ts` wi
 The list's AGE column (`now`, `3d`) is the age of the row's last commit, not of the worktree; verdict reasons such as "Created just now" use when the worktree was created. So `feature/new-endpoint`, made at seed time on top of a main commit dated 3 days back, reads `3d` beside `Created just now, so it may s…`: expected, and `i` shows the same split (`LAST COMMIT   3d ago`). The worktrees made by the fixture's squash-merge builders read `now` because their own commits are new.
 
 `up --seed <file>` builds the sandbox with a module's default export instead (a `SeedModule` from `stack.ts`); `scripts/readme-images/seed.ts`, the README's made-up projects, is one. Its rows differ from this table, and `state` lists only repos under its scan root.
+
+`up --app-args='<args>'` puts extra arguments on the app's command line after the scan root, so a flag such as `--depth 0` or `--offline` can be driven in the real app: `up --name <task> --app-args='--depth 0'`. The arguments are split on spaces, so one cannot contain a space, and a value that starts with `--` needs the `=`. The instance keeps them: a stopped instance restarts with them, `up` on a running one with other arguments is refused (`down --name <task>`, then `up` again), and `down --purge` forgets them. Without the option the command is unchanged. If the app exits on its arguments (`--version`, an invalid flag), `up` fails with the pane's text in `screen`.
 
 Assume nothing beyond this table, and only what `state` shows after you change things. Removals are real, so a check that removes rows starts from a fresh seed: `down --purge`, then `up` (half a second). To arrange other state, use Git or `wt` as the instance's user, through a supported path, in the same shell call as the `eval` of `env` → `exports` (it reads `env --full`), as [features/rescan.md](features/rescan.md) does. Never edit `.git` files or the cache to fake the behavior under test.
 
