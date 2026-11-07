@@ -47,6 +47,9 @@ export function canAskGitHub(row: WorktreeFacts): boolean {
   );
 }
 
+/** `gh` processes running at once, across every repository. */
+export const GH_CONCURRENCY = 4;
+
 type Unchecked = Extract<ForgeCheck, { kind: "unchecked" }>;
 /** Merged pull requests from one branch into the default branch. */
 type MergedInto = NonNullable<ReturnType<typeof readChained>[number]>;
@@ -61,8 +64,10 @@ export function createGitHubCheck(options: {
   runner: CommandRunner;
   proofs: ProofCache;
   timeoutMs?: number;
+  concurrency?: number;
 }): FollowUp {
   const { github, runner, proofs, timeoutMs = GH_TIMEOUT_MS } = options;
+  const slots = createSlots(options.concurrency ?? GH_CONCURRENCY);
 
   async function check(
     repo: string,
@@ -95,13 +100,18 @@ export function createGitHubCheck(options: {
     return forges;
   }
 
-  /** Sends each request in turn; once gh is missing or signed out, the rest get the same answer unsent. */
+  /**
+   * Sends a repository's requests in turn. Once one goes unanswered (gh missing, signed out, failed or timed
+   * out), the rest get the same answer unsent.
+   */
   function sender(ghPath: string, signal: AbortSignal) {
     let stop: GhOutcome | null = null;
     return async (request: GraphqlRequest): Promise<GhOutcome> => {
       if (stop) return stop;
-      const outcome = await runGraphql(ghPath, request, runner, signal, timeoutMs);
-      if (outcome.kind === "unchecked" && outcome.why !== "failed") stop = outcome;
+      const outcome = await slots.run(signal, () =>
+        runGraphql(ghPath, request, runner, signal, timeoutMs),
+      );
+      if (outcome.kind === "unchecked") stop = outcome;
       return outcome;
     };
   }
@@ -191,5 +201,46 @@ export function createGitHubCheck(options: {
         ? []
         : [{ id: row.id, headSha: row.headSha, facts: { forge: forges.get(row.id) } }],
     );
+  };
+}
+
+/** Runs at most `size` tasks at once, in the order they asked; a task whose signal aborts while waiting throws. */
+function createSlots(size: number) {
+  let running = 0;
+  const waiting: Array<() => void> = [];
+  async function acquire(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) throw new Error("Command aborted");
+    if (running < size) {
+      running++;
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const start = () => {
+        signal.removeEventListener("abort", cancel);
+        resolve();
+      };
+      const cancel = () => {
+        waiting.splice(waiting.indexOf(start), 1);
+        reject(new Error("Command aborted"));
+      };
+      waiting.push(start);
+      signal.addEventListener("abort", cancel, { once: true });
+    });
+  }
+  function release(): void {
+    // The slot passes straight to the next task waiting, if any.
+    const next = waiting.shift();
+    if (next) next();
+    else running--;
+  }
+  return {
+    async run<T>(signal: AbortSignal, task: () => Promise<T>): Promise<T> {
+      await acquire(signal);
+      try {
+        return await task();
+      } finally {
+        release();
+      }
+    },
   };
 }

@@ -23,7 +23,16 @@ test("runs gh with every value passed by -f, and the environment that keeps it q
   expect(seen).toEqual([
     {
       command: "/opt/gh",
-      args: ["api", "graphql", "-f", `query=${request.query}`, "-f", "owner=acme"],
+      args: [
+        "api",
+        "graphql",
+        "--hostname",
+        "github.com",
+        "-f",
+        `query=${request.query}`,
+        "-f",
+        "owner=acme",
+      ],
       environment: { GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1" },
     },
   ]);

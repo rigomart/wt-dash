@@ -4,7 +4,8 @@ import { join } from "node:path";
 /**
  * A fake GitHub CLI for the sandbox. `gh-cli.ts` is the executable; this module holds the GitHub model it
  * answers from, and `createFakeGh`, which the fixture uses to write that model and read the calls made.
- * It answers only `gh api graphql -f query=… -f <variable>=…`, and only the fields wt-dash's query asks for.
+ * It answers only `gh api graphql --hostname github.com -f query=… -f <variable>=…`, and only the fields wt-dash's
+ * query asks for. Without `--hostname`, real gh asks `GH_HOST` or the only signed-in host, so the fake refuses it.
  */
 
 /** The environment variable naming the state file the fake reads on every call. */
@@ -23,10 +24,13 @@ export interface GhCommit {
   tree: string;
 }
 
-/** A merged pull request. */
+/** A pull request, merged unless `state` says otherwise. */
 export interface GhPullRequest {
   number: number;
-  mergedAt: string;
+  /** MERGED when omitted. */
+  state?: "MERGED" | "OPEN" | "CLOSED";
+  /** When it merged; null for an open or closed one. */
+  mergedAt: string | null;
   /** The branch it was merged into, `baseRefName`. */
   base: string;
   headRefName: string;
@@ -35,6 +39,11 @@ export interface GhPullRequest {
   headRepository?: string;
   /** Its commits, oldest first, as GitHub lists them after any force push. */
   commits: GhCommit[];
+  /**
+   * Commits pushed to its branch and later force-pushed away. GitHub still knows them and still lists this pull
+   * request among their associated pull requests, but they aren't among its commits.
+   */
+  forcePushed?: GhCommit[];
 }
 
 export interface GhRepo {
@@ -97,9 +106,18 @@ export function answerGh(state: GhState, args: string[]): GhResult {
       `only "gh api graphql -f …" is supported, not "gh ${args.join(" ")}". Extend tests/support/gh.ts if the app needs it.`,
     );
   const fields: Record<string, string> = {};
+  let hostname: string | undefined;
   for (let index = 2; index < args.length; index++) {
     const arg = args[index]!;
     let field: string | undefined;
+    if (arg === "--hostname") {
+      hostname = args[++index];
+      continue;
+    }
+    if (arg.startsWith("--hostname=")) {
+      hostname = arg.slice("--hostname=".length);
+      continue;
+    }
     if (arg === "-f" || arg === "--raw-field") field = args[++index];
     else if (arg.startsWith("--raw-field=")) field = arg.slice("--raw-field=".length);
     else if (arg.startsWith("-f") && arg.length > 2) field = arg.slice(2);
@@ -110,6 +128,11 @@ export function answerGh(state: GhState, args: string[]): GhResult {
     if (field === undefined || equals < 1) return refuse(`-f needs key=value, got ${field}`);
     fields[field.slice(0, equals)] = field.slice(equals + 1);
   }
+  if (hostname === undefined)
+    return refuse(
+      "no --hostname: gh would ask GH_HOST or the only signed-in host, which may not be github.com",
+    );
+  if (hostname !== "github.com") return refuse(`only github.com is modelled, not ${hostname}`);
   if (state.mode !== "ok" && state.mode !== "missing-repo") return failures[state.mode];
   const { query, ...variables } = fields;
   if (query === undefined) return refuse("no -f query=…");
@@ -416,11 +439,18 @@ function root(
   };
 }
 
+const stateOf = (pr: GhPullRequest) => pr.state ?? "MERGED";
+
 function repository(repo: GhRepo): Node {
   const nameWithOwner = `${repo.owner}/${repo.name}`;
-  const byMerge = [...repo.pullRequests].sort(
-    (a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt) || a.number - b.number,
-  );
+  const byMerge = repo.pullRequests
+    .filter((pr) => stateOf(pr) === "MERGED")
+    .sort((a, b) => Date.parse(a.mergedAt!) - Date.parse(b.mergedAt!) || a.number - b.number);
+  const unmerged = repo.pullRequests
+    .filter((pr) => stateOf(pr) !== "MERGED")
+    .sort((a, b) => a.number - b.number);
+  const known = (pr: GhPullRequest) => [...pr.commits, ...(pr.forcePushed ?? [])];
+  const holds = (pr: GhPullRequest, oid: string) => known(pr).some((commit) => commit.oid === oid);
   const node: Node = {
     __typename: "Repository",
     name: repo.name,
@@ -430,7 +460,7 @@ function repository(repo: GhRepo): Node {
       if (expression !== undefined)
         throw new QueryError("fake gh: object(expression:) isn't modelled");
       const found = repo.pullRequests
-        .flatMap((pr) => pr.commits)
+        .flatMap(known)
         .find((commit) => commit.oid === String(oid).toLowerCase());
       return found ? commit(found) : null;
     },
@@ -445,7 +475,7 @@ function repository(repo: GhRepo): Node {
       );
       const nodes = sorted.filter(
         (pr) =>
-          (!states.length || states.includes("MERGED")) &&
+          (!states.length || states.includes(stateOf(pr))) &&
           (args.headRefName === undefined || pr.headRefName === args.headRefName) &&
           (args.baseRefName === undefined || pr.base === args.baseRefName),
       );
@@ -461,10 +491,14 @@ function repository(repo: GhRepo): Node {
       __typename: "Commit",
       oid: found.oid,
       tree: { __typename: "Tree", oid: found.tree },
-      // GitHub lists the pull request that first brought the commit in, not later ones that contain it too.
+      // GitHub lists the merged pull request that first brought the commit in, not later ones that contain it
+      // too, and counts a commit force-pushed away from it. A commit no merged pull request has lists the open and
+      // closed ones it was pushed to.
       associatedPullRequests: (args: Args) => {
-        const first = byMerge.find((pr) => pr.commits.some(({ oid }) => oid === found.oid));
-        const nodes = first ? [pullRequest(first)] : [];
+        const first = byMerge.find((pr) => holds(pr, found.oid));
+        const nodes = (first ? [first] : unmerged.filter((pr) => holds(pr, found.oid))).map(
+          pullRequest,
+        );
         return {
           __typename: "PullRequestConnection",
           totalCount: nodes.length,
@@ -477,8 +511,8 @@ function repository(repo: GhRepo): Node {
     return {
       __typename: "PullRequest",
       number: pr.number,
-      state: "MERGED",
-      merged: true,
+      state: stateOf(pr),
+      merged: stateOf(pr) === "MERGED",
       mergedAt: pr.mergedAt,
       baseRefName: pr.base,
       headRefName: pr.headRefName,
@@ -521,7 +555,8 @@ ${range(oids)
   .map(
     (index) => `    a${index}: object(oid:$oid${index}) { ... on Commit {
       associatedPullRequests(first:5) { nodes { number state mergedAt baseRefName headRefName headRefOid
-        repository { nameWithOwner defaultBranchRef { name } } } } } }`,
+        repository { nameWithOwner defaultBranchRef { name } }
+        commits(last:250) { nodes { commit { oid } } } } } } }`,
   )
   .join("\n")}
 ${range(heads)
@@ -558,11 +593,13 @@ ${range(bases)
 }`;
 }
 
-/** `gh` arguments for `query`, every value passed with `-f` as the app will. */
+/** `gh` arguments for `query` on github.com, every value passed with `-f` as the app will. */
 export function graphqlArgs(query: string, variables: Record<string, string>): string[] {
   return [
     "api",
     "graphql",
+    "--hostname",
+    "github.com",
     "-f",
     `query=${query}`,
     ...Object.entries(variables).flatMap(([key, value]) => ["-f", `${key}=${value}`]),

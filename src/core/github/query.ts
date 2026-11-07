@@ -1,7 +1,12 @@
 import type { ForgeProof } from "../types";
 import type { GitHubRepo } from "./remote";
 
-/** Rows asked about in one request, which keeps it far below GitHub's limit of 500,000 nodes. */
+/**
+ * Rows asked about in one request. GitHub limits a query to 500,000 nodes, counting each connection's `first` or
+ * `last` times those of the connections around it. Each row costs 5 + 5 × 250 = 1,255 nodes for `aN` and as much
+ * for each of its at most two branch names in `bN`, so 100 rows cost at most 100 × 3 × 1,255 = 376,500, and
+ * 251,000 when no upstream is renamed.
+ */
 export const ROWS_PER_REQUEST = 100;
 
 export interface GraphqlRequest {
@@ -65,7 +70,7 @@ export function lookupRequest(
   const fields = [
     ...rows.map(
       (_, index) =>
-        `a${index}: object(oid:$oid${index}) { ... on Commit { associatedPullRequests(first:5) { nodes { number state mergedAt baseRefName headRefName headRefOid repository { nameWithOwner defaultBranchRef { name } } } } } }`,
+        `a${index}: object(oid:$oid${index}) { ... on Commit { associatedPullRequests(first:5) { nodes { number state mergedAt baseRefName headRefName headRefOid repository { nameWithOwner defaultBranchRef { name } } commits(last:250) { nodes { commit { oid } } } } } } }`,
     ),
     ...heads.map(
       (_, index) =>
@@ -181,13 +186,20 @@ export function readLookup(
       kind: "proven",
       proof: { kind: "proven", tip: row.tip, pr: pr.number, mergedAt: pr.mergedAt, base, by },
     });
-    // Proof A: GitHub lists a merged pull request of this repository holding the exact tip.
+    // Proof A: a merged pull request of this repository whose own commits include the exact tip. GitHub also
+    // associates commits that were force-pushed away from a pull request, so the association alone proves nothing.
     const bases = new Set<string>();
     for (const node of nodes(object(repository[`a${index}`])?.associatedPullRequests)) {
       const pr = merged(node);
       const target = object(node.repository);
       const base = text(node.baseRefName);
-      if (!pr || node.state !== "MERGED" || !base || !sameRepo(target?.nameWithOwner, repo))
+      if (
+        !pr ||
+        node.state !== "MERGED" ||
+        !base ||
+        !sameRepo(target?.nameWithOwner, repo) ||
+        !commitOids(node, "oid").includes(row.tip)
+      )
         continue;
       if (base === text(object(target?.defaultBranchRef)?.name)) return prove(pr, base, "commit");
       bases.add(base);

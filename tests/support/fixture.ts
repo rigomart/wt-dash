@@ -171,6 +171,17 @@ export interface Repo {
   /** A worktree with a commit made after its pull request merged, which GitHub lacks: still Review. */
   prMissingCommit(branch: string): Promise<Built>;
   /**
+   * A worktree whose pushed tip was force-pushed away from its pull request before the pull request merged
+   * other work. GitHub still associates the tip with the merged pull request, but its commits don't include
+   * it: still Review.
+   */
+  prForcePushedAway(branch: string): Promise<Built>;
+  /**
+   * A worktree whose tip is only in a pull request that is still open, or `closed` without merging. Its branch
+   * is still on GitHub and main hasn't moved, so Worktrunk shows one unmerged commit: still Review.
+   */
+  prUnmerged(branch: string, options: { state: "OPEN" | "CLOSED" }): Promise<Built>;
+  /**
    * A worktree whose tip was merged into `base` with a merge commit by one pull request, then `base` squash-merged
    * into main by a second, whose commits include the tip; `base` has a commit of its own and no local branch.
    * Safe once asked.
@@ -589,7 +600,7 @@ export async function createSandbox(
      */
     async function mergePullRequest(
       file: string,
-      pr: { headRefName: string; head: string; commits: string[] },
+      pr: { headRefName: string; head: string; commits: string[]; forcePushed?: string[] },
     ): Promise<number> {
       const github = toGitHub("mergePullRequest");
       const number = ++pullRequests;
@@ -616,6 +627,7 @@ export async function createSandbox(
         headRefName: pr.headRefName,
         headRefOid: pr.head,
         commits: await described(pr.commits),
+        ...(pr.forcePushed ? { forcePushed: await described(pr.forcePushed) } : {}),
       });
       await git(path, "push", "-q", "origin", "--delete", pr.headRefName);
       await git(path, "fetch", "-q", "--prune", "origin");
@@ -898,6 +910,46 @@ export async function createSandbox(
         });
         await editLine(worktree, file, 9, `${branch}, after the merge`);
         return { ...built(branch, worktree, unprovable(2)), ...onGitHub([number], "Review") };
+      },
+      async prForcePushedAway(branch) {
+        movesMain("prForcePushedAway");
+        toGitHub("prForcePushedAway");
+        const { file, worktree, tip } = await pullRequestBranch(branch);
+        // Other work replaced the tip on GitHub: made here, then dropped, so no ref here reaches it.
+        await git(worktree, "reset", "-q", "--hard", `${tip}~1`);
+        await editLine(worktree, file, CHANGED, `${branch}, rewritten`);
+        const rewritten = await head(worktree);
+        await git(worktree, "reset", "-q", "--hard", tip);
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: rewritten,
+          commits: [rewritten],
+          forcePushed: [tip],
+        });
+        return { ...built(branch, worktree, unprovable(1)), ...onGitHub([number], "Review") };
+      },
+      async prUnmerged(branch, { state }) {
+        movesMain("prUnmerged");
+        const github = toGitHub("prUnmerged");
+        const { worktree, tip } = await pullRequestBranch(branch);
+        const number = ++pullRequests;
+        await gh.addPullRequest(github.owner, github.name, {
+          number,
+          state,
+          mergedAt: null,
+          base: "main",
+          headRefName: branch,
+          headRefOid: tip,
+          commits: await described([tip]),
+        });
+        return {
+          ...built(branch, worktree, {
+            verdict: "Review",
+            status: "unmerged commits",
+            reason: "1 commit isn't in main.",
+          }),
+          ...onGitHub([number], "Review"),
+        };
       },
       async prStacked(branch, { base = `${branch}-base` } = {}) {
         movesMain("prStacked");

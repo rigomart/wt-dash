@@ -315,12 +315,130 @@ test("a stacked pull request is asked about in one chained request, and proves t
   expect(ghCalls()[1]!.args.filter((arg) => !arg.startsWith("query=") && arg !== "-f")).toEqual([
     "api",
     "graphql",
+    "--hostname",
+    "github.com",
     "owner=acme",
     "name=alpha",
     "default=main",
     "base0=stack/base",
     "base1=stack/other",
   ]);
+});
+
+test("after a request fails or times out, the repository's other requests aren't sent and their rows fail", async () => {
+  for (const [name, gh, timeoutMs] of [
+    ["failed", async () => ({ stdout: "", stderr: "HTTP 502", exitCode: 1 }), undefined],
+    [
+      "timed out",
+      ((_command, _args, signal) =>
+        new Promise((_, reject) =>
+          signal?.addEventListener("abort", () => reject(new Error("Command aborted"))),
+        )) as CommandRunner,
+      20,
+    ],
+  ] as const) {
+    const { proofs } = await proofCache();
+    const { runner, ghCalls } = world({ gh });
+    const rows = Array.from({ length: 250 }, (_, index) => row(index + 1));
+    const patches = await createGitHubCheck({ github: ONLINE, runner, proofs, timeoutMs })(
+      REPO,
+      rows,
+      live(),
+    );
+    expect({
+      name,
+      forges: new Set(Object.values(forges(patches)).map((f) => JSON.stringify(f))),
+    }).toEqual({
+      name,
+      forges: new Set([JSON.stringify({ kind: "unchecked", why: "failed" })]),
+    });
+    expect({ name, calls: ghCalls().length }).toEqual({ name, calls: 1 });
+  }
+});
+
+test("a failure after a stacked candidate skips the chained request and fails that row too", async () => {
+  const { proofs } = await proofCache();
+  const model: GhState = {
+    mode: "ok",
+    repos: [
+      {
+        owner: "acme",
+        name: "alpha",
+        defaultBranch: "main",
+        pullRequests: [merged(1, { base: "stack/base" })],
+      },
+    ],
+  };
+  let calls = 0;
+  const { runner, ghCalls } = world({
+    gh: async (_command, args) =>
+      ++calls === 1 ? answerGh(model, args) : { stdout: "", stderr: "HTTP 502", exitCode: 1 },
+  });
+  const rows = Array.from({ length: 101 }, (_, index) => row(index + 1));
+  const patches = await createGitHubCheck({ github: ONLINE, runner, proofs })(REPO, rows, live());
+  // Row 1 needed the chained request; row 101 was in the chunk that failed.
+  expect(forges(patches)[rows[0]!.id]).toEqual({ kind: "unchecked", why: "failed" });
+  expect(forges(patches)[rows[100]!.id]).toEqual({ kind: "unchecked", why: "failed" });
+  expect(forges(patches)[rows[1]!.id]).toEqual({ kind: "not-found", tip: sha(2) });
+  expect(ghCalls()).toHaveLength(2);
+});
+
+test("at most 4 gh processes run at once across repositories; a fifth waits for one to finish", async () => {
+  const { proofs } = await proofCache();
+  const answers: Array<() => void> = [];
+  const { runner, ghCalls } = world({
+    gh: () =>
+      new Promise((resolve) =>
+        answers.push(() =>
+          resolve({
+            stdout: JSON.stringify({ data: { repository: null } }),
+            stderr: "",
+            exitCode: 0,
+          }),
+        ),
+      ),
+  });
+  const check = createGitHubCheck({ github: ONLINE, runner, proofs });
+  const repos = Array.from({ length: 5 }, (_, index) => `/repos/r${index}`);
+  const done = repos.map((repo, index) => check(repo, [row(index + 1)], live()));
+  const settle = async () => {
+    for (let tick = 0; tick < 20; tick++) await Bun.sleep(1);
+  };
+  await settle();
+  expect(ghCalls()).toHaveLength(4);
+  expect(answers).toHaveLength(4);
+  answers.shift()!();
+  await settle();
+  expect(ghCalls()).toHaveLength(5);
+  for (const answer of answers.splice(0)) answer();
+  await Promise.all(done);
+});
+
+test("a check waiting for a gh slot that is aborted throws without running gh", async () => {
+  const { proofs } = await proofCache();
+  const answers: Array<() => void> = [];
+  const { runner, ghCalls } = world({
+    gh: () =>
+      new Promise((resolve) =>
+        answers.push(() =>
+          resolve({
+            stdout: JSON.stringify({ data: { repository: null } }),
+            stderr: "",
+            exitCode: 0,
+          }),
+        ),
+      ),
+  });
+  const check = createGitHubCheck({ github: ONLINE, runner, proofs, concurrency: 1 });
+  const first = check(REPO, [row(1)], live());
+  const controller = new AbortController();
+  const second = check("/repos/other", [row(2)], controller.signal);
+  await Bun.sleep(5);
+  controller.abort();
+  await expect(second).rejects.toThrow("Command aborted");
+  answers.shift()!();
+  await first;
+  expect(ghCalls()).toHaveLength(1);
 });
 
 test("a chained request that fails leaves its rows unchecked", async () => {
