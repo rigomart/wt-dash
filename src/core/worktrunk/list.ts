@@ -168,6 +168,7 @@ export function parseWorktrunk(repoPath: string, stdout: string): WorktreeRow[] 
       tool: path === null ? "Other" : toolForPath(path, repoPath),
       changes: changesFrom(worktree?.changes),
       upstreamAhead: typeof upstream?.ahead === "number" ? upstream.ahead : null,
+      upstreamBranch: string(upstream?.branch),
       mainState: string(display?.state),
       integrationReason: string(integration?.reason),
       lockReason: string(object(worktree?.locked)?.reason),

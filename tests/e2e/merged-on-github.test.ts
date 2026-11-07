@@ -6,11 +6,50 @@ import {
   dialogRow,
   exists,
   inSandbox,
+  lineWith,
   removals,
   rowOf,
   withApp,
   TEST_TIMEOUT,
 } from "../support/app";
+import { online } from "../support/fixture";
+
+test(
+  "a worktree squash-merged on GitHub shows Review while gh is asked, then Safe with its pull request",
+  () =>
+    inSandbox(async (sandbox) => {
+      const alpha = await sandbox.repo("alpha", { github: true });
+      const feature = await alpha.prMergedWorktree("feature");
+      const pr = feature.github!.pullRequests[0]!;
+      // gh answers after a pause, so the screen shows the row before GitHub settles it.
+      await sandbox.gh.setMode("ok", 1500);
+      await withApp(
+        sandbox,
+        { width: 120, name: "checked on GitHub", github: online(sandbox) },
+        async (app) => {
+          let frame = await app.waitFor(
+            (text) =>
+              lineWith(text, "wt-dash").includes("checking GitHub") &&
+              rowOf(text, "feature") !== null,
+          );
+          expect(rowOf(frame, "feature")).toStartWith(
+            "□ feature unmerged commits 1 commit isn't in main, and merging would conflict ",
+          );
+          frame = await app.waitFor(
+            (text) => rowOf(text, "feature")?.includes("merged on GitHub") ?? false,
+          );
+          expect(rowOf(frame, "feature")).toStartWith(
+            `□ feature merged on GitHub PR #${pr} merged `,
+          );
+          expect(rowOf(frame, "feature")).toContain(" with this exact commit ");
+          frame = await app.waitFor((text) => !lineWith(text, "wt-dash").includes("checking"));
+          expect(lineWith(frame, "Review 0")).toContain("Safe 1");
+          expect(await sandbox.gh.calls()).toHaveLength(1);
+        },
+      );
+    }),
+  TEST_TIMEOUT,
+);
 
 test(
   "a worktree a follow-up proves merged on GitHub: the dialog names its PR, and removing it deletes the branch",

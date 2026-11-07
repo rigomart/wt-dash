@@ -16,15 +16,9 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { createServices } from "../../src/app";
 import type { ActionService } from "../../src/core/removal/types";
-import { findProcesses } from "../../src/core/processes";
-import { createDashboardService } from "../../src/core/scan/dashboard";
-import {
-  discoverRepos,
-  findRepos,
-  readCreatedAt,
-  type RepoSource,
-} from "../../src/core/scan/discovery";
-import { findOrphans } from "../../src/core/scan/orphans";
+import type { GitHubOptions } from "../../src/core/github/check";
+import type { FollowUp } from "../../src/core/scan/dashboard";
+import { discoverRepos, readCreatedAt, type RepoSource } from "../../src/core/scan/discovery";
 import type {
   CommandResult,
   CommandRunner,
@@ -97,8 +91,13 @@ export interface ExecOptions {
 }
 
 export type SavedRepos = NonNullable<Parameters<typeof createServices>[0]["savedRepos"]>;
-/** The dashboard's per-repository follow-up, such as the check that asks GitHub about each row's tip. */
-export type FollowUp = NonNullable<Parameters<typeof createDashboardService>[0]["followUp"]>;
+export type { FollowUp, GitHubOptions };
+
+/** The app's `github` option that asks the sandbox's fake GitHub, or finds no `gh` when the sandbox has none. */
+export const online = (sandbox: Sandbox): GitHubOptions => ({
+  offline: false,
+  ghPath: sandbox.gh.installed ? join(sandbox.gh.bin, "gh") : null,
+});
 
 export interface Services {
   dashboard: DashboardService;
@@ -172,8 +171,9 @@ export interface Repo {
   /** A worktree with a commit made after its pull request merged, which GitHub lacks: still Review. */
   prMissingCommit(branch: string): Promise<Built>;
   /**
-   * A worktree whose tip was squash-merged into `base` by one pull request, then `base` into main by a
-   * second; `base` has a commit of its own and no local branch. Safe once asked.
+   * A worktree whose tip was merged into `base` with a merge commit by one pull request, then `base` squash-merged
+   * into main by a second, whose commits include the tip; `base` has a commit of its own and no local branch.
+   * Safe once asked.
    */
   prStacked(branch: string, options?: { base?: string }): Promise<Built>;
 }
@@ -218,13 +218,15 @@ export interface Sandbox {
   repo(name: string, options?: { github?: boolean }): Promise<Repo>;
   /**
    * Dashboard, action and size services on the sandbox; `cleanup` closes any still open. `runner` replaces the
-   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root. `followUp`
-   * patches each repository's rows after its listing, as the GitHub check does; saved repos are ignored with it.
+   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root. `github` is
+   * the app's option, offline when omitted; `online(sandbox)` asks the fake GitHub. `followUp` replaces the GitHub
+   * check after each repository's listing.
    */
   services(options?: {
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    github?: GitHubOptions;
     followUp?: FollowUp;
   }): Promise<Services>;
   /** Closes services, removes every worktree of the sandbox's repos, then the sandbox. Safe to call twice. */
@@ -908,7 +910,7 @@ export async function createSandbox(
         await editLine(worktree, file, CHANGED, branch);
         const tip = await head(worktree);
         await git(worktree, "push", "-q", "-u", "origin", branch);
-        // The first pull request squash-merges this branch into `base` on GitHub.
+        // The first pull request merges this branch into `base` on GitHub with a merge commit, so `base` holds the tip.
         const first = ++pullRequests;
         const intoBase = await git(
           path,
@@ -916,8 +918,10 @@ export async function createSandbox(
           `${tip}^{tree}`,
           "-p",
           lower,
+          "-p",
+          tip,
           "-m",
-          `${branch} (#${first})`,
+          `Merge ${branch} (#${first})`,
         );
         await git(path, "push", "-q", "origin", `${intoBase}:refs/heads/${base}`);
         await gh.addPullRequest(github.owner, github.name, {
@@ -931,7 +935,7 @@ export async function createSandbox(
         const second = await mergePullRequest(file, {
           headRefName: base,
           head: intoBase,
-          commits: [lower, intoBase],
+          commits: [lower, tip, intoBase],
         });
         await git(path, "push", "-q", "origin", "--delete", branch);
         await git(path, "fetch", "-q", "--prune", "origin");
@@ -948,41 +952,25 @@ export async function createSandbox(
       runner?: CommandRunner;
       sources?: RepoSource[];
       savedRepos?: SavedRepos;
+      github?: GitHubOptions;
       followUp?: FollowUp;
     } = {},
   ): Promise<Services> {
-    const sources = options.sources ?? [{ kind: "scan", folder: scanRoot }];
-    const commands = options.runner ?? runner;
     const app = await createServices({
       home,
-      sources,
+      sources: options.sources ?? [{ kind: "scan", folder: scanRoot }],
       depth: 2,
       wtPath,
-      runner: commands,
+      runner: options.runner ?? runner,
       readCreated,
       savedRepos: options.savedRepos,
+      github: options.github,
+      followUp: options.followUp,
     });
-    // createServices takes no follow-up, so this builds the same dashboard with one, minus saved repos.
-    const dashboard = options.followUp
-      ? createDashboardService({
-          projectRoot: home,
-          wtPath,
-          runner: commands,
-          sizeService: app.sizes,
-          discover: async () =>
-            [...new Set((await findRepos(sources, 2)).flatMap(({ repos }) => repos))].sort(),
-          readCreated,
-          findOrphans: (repos) => findOrphans(home, repos),
-          findProcesses: (paths, signal) => findProcesses(paths, commands, { signal }),
-          followUp: options.followUp,
-        })
-      : app.dashboard;
     const service: Services = {
       ...app,
-      dashboard,
       async close() {
         if (!opened.delete(service)) return;
-        if (dashboard !== app.dashboard) await dashboard.close();
         await app.close();
       },
     };
