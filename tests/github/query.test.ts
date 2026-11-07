@@ -89,6 +89,8 @@ test("the lookup passes every value as a variable, one per tip and one per disti
   expect(ghArgs(request)).toEqual([
     "api",
     "graphql",
+    "--hostname",
+    "github.com",
     "-f",
     `query=${request.query}`,
     ...Object.entries(request.variables).flatMap(([key, value]) => ["-f", `${key}=${value}`]),
@@ -187,70 +189,112 @@ test("a tip merged into another branch is not proven, and names that branch for 
   ]);
 });
 
-test("associated pull requests of another repository, or not merged, prove nothing", () => {
-  const reply: GraphqlReply = {
-    repository: {
-      defaultBranchRef: { name: "main" },
-      a0: {
-        associatedPullRequests: {
-          nodes: [
-            {
-              number: 1,
-              state: "MERGED",
-              mergedAt: "2026-01-01T00:00:00Z",
-              baseRefName: "main",
-              repository: { nameWithOwner: "upstream/app", defaultBranchRef: { name: "main" } },
-            },
-            {
-              number: 2,
-              state: "OPEN",
-              mergedAt: null,
-              baseRefName: "main",
-              repository: { nameWithOwner: "acme/app", defaultBranchRef: { name: "main" } },
-            },
-            {
-              number: 3,
-              state: "CLOSED",
-              mergedAt: null,
-              baseRefName: "main",
-              repository: { nameWithOwner: "acme/app", defaultBranchRef: { name: "main" } },
-            },
-            {
-              number: "4",
-              state: "MERGED",
-              mergedAt: "x",
-              baseRefName: "main",
-              repository: { nameWithOwner: "acme/app", defaultBranchRef: { name: "main" } },
-            },
-          ],
-        },
-      },
-    },
-    errorPaths: [],
-  };
-  expect(readLookup(repo, [row(A)], [], reply).answers).toEqual([{ kind: "not-found", bases: [] }]);
+/** An associatedPullRequests node as GitHub returns it, merged into main in acme/app and holding A. */
+const node = (overrides: Record<string, unknown> = {}) => ({
+  number: 9,
+  state: "MERGED",
+  mergedAt: "2026-01-01T00:00:00Z",
+  baseRefName: "main",
+  repository: { nameWithOwner: "acme/app", defaultBranchRef: { name: "main" } },
+  commits: { nodes: [{ commit: { oid: A } }] },
+  ...overrides,
+});
+const associatedReply = (...nodes: unknown[]): GraphqlReply => ({
+  repository: { defaultBranchRef: { name: "main" }, a0: { associatedPullRequests: { nodes } } },
+  errorPaths: [],
+});
+
+test("associated pull requests of another repository, not merged, or malformed prove nothing", () => {
+  expect(readLookup(repo, [row(A)], [], associatedReply(node())).answers[0]?.kind).toBe("proven");
   // Owner and name match without case, as on GitHub.
-  const upper = { owner: "ACME", name: "App" };
-  const proven: GraphqlReply = {
-    ...reply,
-    repository: {
-      defaultBranchRef: { name: "main" },
-      a0: {
-        associatedPullRequests: {
-          nodes: [
-            {
-              number: 9,
-              state: "MERGED",
-              mergedAt: "2026-01-01T00:00:00Z",
-              baseRefName: "main",
-              repository: { nameWithOwner: "acme/app", defaultBranchRef: { name: "main" } },
-            },
-          ],
-        },
-      },
-    },
-  };
-  expect(readLookup(upper, [row(A)], [], proven).answers[0]?.kind).toBe("proven");
+  expect(
+    readLookup({ owner: "ACME", name: "App" }, [row(A)], [], associatedReply(node())).answers[0]
+      ?.kind,
+  ).toBe("proven");
+  for (const overrides of [
+    { repository: { nameWithOwner: "upstream/app", defaultBranchRef: { name: "main" } } },
+    { state: "OPEN", mergedAt: null },
+    { state: "CLOSED", mergedAt: null },
+    // Open or closed, even if GitHub gave a time.
+    { state: "OPEN" },
+    { state: "CLOSED" },
+    { number: "9" },
+    { mergedAt: 5 },
+  ])
+    expect({
+      overrides,
+      answers: readLookup(repo, [row(A)], [], associatedReply(node(overrides))).answers,
+    }).toEqual({
+      overrides,
+      answers: [{ kind: "not-found", bases: [] }],
+    });
+});
+
+test("a merged pull request GitHub associates with the tip proves nothing unless its own commits include the tip", () => {
+  // GitHub keeps associating a commit force-pushed away from a pull request with it.
+  const forcedAway = node({ commits: { nodes: [{ commit: { oid: B } }] } });
+  expect(readLookup(repo, [row(A)], [], associatedReply(forcedAway)).answers).toEqual([
+    { kind: "not-found", bases: [] },
+  ]);
+  expect(readLookup(repo, [row(A)], [], associatedReply(node({ commits: null }))).answers).toEqual([
+    { kind: "not-found", bases: [] },
+  ]);
+  // Into another branch, it isn't a stacked candidate either.
+  expect(
+    readLookup(repo, [row(A)], [], associatedReply({ ...forcedAway, baseRefName: "stack/base" }))
+      .answers,
+  ).toEqual([{ kind: "not-found", bases: [] }]);
+
+  // The same through the fake: the tip was force-pushed away from PR 1, which merged other commits.
+  const model = state([
+    pr({
+      number: 1,
+      headRefOid: B,
+      commits: [{ oid: B, tree: tree("2") }],
+      forcePushed: [{ oid: A, tree: tree("1") }],
+    }),
+  ]);
+  const rows = [row(A, ["feature/x"], tree("1"))];
+  const { request, heads } = lookupRequest(repo, rows);
+  const reply = send(model, request);
+  expect((reply.repository as { a0: unknown }).a0).toMatchObject({
+    associatedPullRequests: { nodes: [{ number: 1, state: "MERGED" }] },
+  });
+  expect(readLookup(repo, rows, heads, reply).answers).toEqual([
+    { kind: "not-found", samePr: { number: 1, mergedAt: "2026-01-01T00:00:00Z" }, bases: [] },
+  ]);
+});
+
+test("the fake lists open and closed pull requests for a commit no merged one holds, and they prove nothing", () => {
+  const model = state([
+    pr({ number: 1, state: "OPEN", mergedAt: null }),
+    pr({
+      number: 2,
+      state: "CLOSED",
+      mergedAt: null,
+      headRefOid: B,
+      commits: [{ oid: B, tree: tree("2") }],
+    }),
+  ]);
+  const rows = [row(A, ["feature/x"], tree("1")), row(B, ["feature/x"], tree("2"))];
+  const { request, heads } = lookupRequest(repo, rows);
+  const reply = send(model, request);
+  const listed = reply.repository as Record<
+    string,
+    { associatedPullRequests?: { nodes: unknown[] }; nodes?: unknown[] }
+  >;
+  expect(listed.a0!.associatedPullRequests!.nodes).toEqual([
+    expect.objectContaining({ number: 1, state: "OPEN", mergedAt: null }),
+  ]);
+  expect(listed.a1!.associatedPullRequests!.nodes).toEqual([
+    expect.objectContaining({ number: 2, state: "CLOSED", mergedAt: null }),
+  ]);
+  // states:MERGED leaves them out of the branch's list.
+  expect(listed.b0!.nodes).toEqual([]);
+  expect(readLookup(repo, rows, heads, reply).answers).toEqual([
+    { kind: "not-found", bases: [] },
+    { kind: "not-found", bases: [] },
+  ]);
 });
 
 test("partial data: rows whose fields errored fail, the others are read", () => {

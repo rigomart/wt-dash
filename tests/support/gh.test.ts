@@ -95,6 +95,7 @@ const associated = (pr: GhPullRequest) => ({
   headRefName: pr.headRefName,
   headRefOid: pr.headRefOid,
   repository: { nameWithOwner: "acme/app", defaultBranchRef: { name: "main" } },
+  commits: { nodes: pr.commits.map(({ oid }) => ({ commit: { oid } })) },
 });
 const fromHead = (pr: GhPullRequest) => ({
   number: pr.number,
@@ -237,6 +238,12 @@ test.each([
   ["another API", ["api", "repos/acme/app"]],
   ["a typed -F field", ["api", "graphql", "-f", "query={ viewer { login } }", "-F", "first=5"]],
   ["another flag", ["api", "graphql", "--jq", ".data", "-f", "query={ viewer { login } }"]],
+  // Without --hostname real gh picks GH_HOST or the only signed-in host, which may be GitHub Enterprise.
+  ["a query without --hostname", ["api", "graphql", "-f", "query={ rateLimit { cost } }"]],
+  [
+    "another host",
+    ["api", "graphql", "--hostname", "ghe.example.com", "-f", "query={ rateLimit { cost } }"],
+  ],
 ])("refuses %s loudly", async (_, args) => {
   await given({});
   const result = await gh(args);

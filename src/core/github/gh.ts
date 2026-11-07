@@ -14,11 +14,16 @@ export type GhOutcome =
       why: Extract<ForgeUncheckedReason, "gh-missing" | "signed-out" | "failed">;
     };
 
-/** `gh api graphql` with the query and every variable passed as a raw string with `-f`. */
+/**
+ * `gh api graphql` on github.com, with the query and every variable passed as a raw string with `-f`. Without
+ * `--hostname`, gh would use `GH_HOST` or the only host it is signed in to, such as a GitHub Enterprise server.
+ */
 export function ghArgs(request: GraphqlRequest): string[] {
   return [
     "api",
     "graphql",
+    "--hostname",
+    "github.com",
     "-f",
     `query=${request.query}`,
     ...Object.entries(request.variables).flatMap(([key, value]) => ["-f", `${key}=${value}`]),
