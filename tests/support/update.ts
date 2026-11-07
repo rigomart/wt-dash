@@ -65,6 +65,7 @@ export function context(rows: WorktreeRow[], sizing: string[] = []): Context {
     errors: {},
     fatalError: null,
     sizing,
+    checking: 0,
     processes: {},
     progress: {
       phase: "complete",
