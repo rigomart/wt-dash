@@ -1,4 +1,4 @@
-import { assess } from "../assess";
+import { assessRow } from "../assess";
 import { listArgs, parseWorktrunk, SchemaMismatchError } from "../worktrunk/list";
 import { discoverRepos, readLinkedWorktrees, type LinkedWorktrees } from "./discovery";
 import { enrichRows } from "./enrich";
@@ -109,9 +109,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     return rows.map((row) => {
       const patch = patches.get(row.id);
       if (!patch || patch.headSha !== row.headSha) return row;
-      const patched = { ...row, ...patch.facts };
-      const { verdict, reason } = assess(patched);
-      return { ...patched, verdict, reason };
+      return assessRow({ ...row, ...patch.facts });
     });
   }
 
