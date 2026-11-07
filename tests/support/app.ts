@@ -7,7 +7,15 @@ import type { RepoSource } from "../../src/core/scan/discovery";
 import type { CommandRunner } from "../../src/core/types";
 import { runTerminal } from "../../src/ui/terminal";
 import { sizeLabel } from "../../src/ui/format";
-import { createSandbox, type Built, type SavedRepos, type Sandbox, type Services } from "./fixture";
+import {
+  createSandbox,
+  type Built,
+  type FollowUp,
+  type GitHubOptions,
+  type SavedRepos,
+  type Sandbox,
+  type Services,
+} from "./fixture";
 
 /** Keys `press` sends by name; anything else is sent as typed text, so "D" is a shifted d. */
 const NAMED = ["escape", "enter", "tab", "space", "backspace", "up", "down", "left", "right"];
@@ -61,7 +69,7 @@ const matches = (frame: string, match: FrameMatch): boolean =>
 
 /**
  * Starts the real runTerminal on the sandbox's real services, in an OpenTUI test renderer. `sources` replaces the
- * scan root, as from prepareStartup.
+ * scan root, as from prepareStartup. `github` and `followUp` are the app's, as in `Sandbox.services`.
  */
 export async function startApp(
   sandbox: Sandbox,
@@ -71,15 +79,19 @@ export async function startApp(
     runner,
     sources,
     savedRepos,
+    github,
+    followUp,
   }: {
     width: number;
     height?: number;
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    github?: GitHubOptions;
+    followUp?: FollowUp;
   },
 ): Promise<App> {
-  const services = await sandbox.services({ runner, sources, savedRepos });
+  const services = await sandbox.services({ runner, sources, savedRepos, github, followUp });
   const setup = await createTestRenderer({ width, height });
   const running = runTerminal(services.dashboard, {
     renderer: setup.renderer,
@@ -221,6 +233,8 @@ export async function withApp(
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    github?: GitHubOptions;
+    followUp?: FollowUp;
     name: string;
   },
   body: (app: App) => Promise<void>,

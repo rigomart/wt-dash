@@ -100,6 +100,7 @@ function fakeService(
     errors: {},
     fatalError: null,
     sizing: [],
+    checking: 0,
     processes: {},
   };
   let refreshes = 0;
@@ -471,6 +472,21 @@ for (const activity of ["scanning", "sizing", "toast"] as const) {
   });
 }
 
+test("the header says GitHub is being checked while a follow-up runs, beside the sizing count", async () => {
+  const item = row("api", 2000, { sizeKiB: null, sizeMeasuredAt: null });
+  const ui = await start(130, 20, [item]);
+  try {
+    ui.fake.update({ checking: 2, sizing: [item.path!] });
+    let header = (await ui.frame()).split("\n")[0]!;
+    expect(header).toContain("1 sizing · checking GitHub · scanned ");
+    ui.fake.update({ checking: 0, sizing: [] });
+    header = (await ui.frame()).split("\n")[0]!;
+    expect(header).not.toContain("checking GitHub");
+  } finally {
+    await ui.stop();
+  }
+});
+
 test("focus changes restart the file debounce, including a quick return to the same row (audit #4)", async () => {
   const inspected: string[] = [];
   const { actions } = fakeActions((rows) => rows.map((item) => entry(item)), {
@@ -631,6 +647,58 @@ test("the confirm bar names uncommitted changes it will discard, and esc cancels
         reapProcesses: true,
       },
     });
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("the confirm dialog names the PR that proves a branch merged on GitHub, and D leaves that branch alone", async () => {
+  const item = row("api", 2000);
+  const { actions, executed } = fakeActions((rows) =>
+    rows.map((selected) => entry(selected, { branchProof: { pr: 60 } })),
+  );
+  const ui = await start(110, 24, [item], actions);
+  try {
+    ui.setup.mockInput.pressKey("x");
+    let frame = await ui.frame();
+    expect(frame).toContain("Deletes branch api: merged on GitHub as PR #60");
+    expect(frame).not.toContain("Merged branches are deleted.");
+    expect(frame).not.toContain("unmerged branch");
+    ui.setup.mockInput.pressKey("D");
+    frame = await ui.frame();
+    expect(frame).toContain("Every branch here is merged or detached; nothing extra to delete");
+    ui.setup.mockInput.pressKey("y");
+    await ui.frame();
+    expect(executed[0]).toEqual({
+      [item.id]: {
+        include: true,
+        discardChanges: false,
+        forceDeleteBranch: false,
+        reapProcesses: true,
+      },
+    });
+  } finally {
+    await ui.stop();
+  }
+});
+
+test("the confirm dialog shortens the PRs of many branches merged on GitHub, beside merged and unmerged ones", async () => {
+  const items = ["api", "docs", "web", "merged", "open"].map((name) => row(name, 100));
+  const { actions } = fakeActions(() => [
+    entry(items[0]!, { branchProof: { pr: 60 } }),
+    entry(items[1]!, { branchProof: { pr: 61 } }),
+    entry(items[2]!, { branchProof: { pr: 62 } }),
+    entry(items[3]!),
+    entry(items[4]!, { branchWillBeRetained: true }),
+  ]);
+  const ui = await start(110, 30, items, actions);
+  try {
+    ui.setup.mockInput.pressKey("x");
+    const frame = await ui.frame();
+    expect(frame).toContain("Keeps 1 unmerged branch  D delete too");
+    expect(frame).toContain(
+      "Deletes 3 branches merged on GitHub: api (PR #60), docs (PR #61) +1 more",
+    );
   } finally {
     await ui.stop();
   }

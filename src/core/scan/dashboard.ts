@@ -1,3 +1,4 @@
+import { assessRow } from "../assess";
 import { listArgs, parseWorktrunk, SchemaMismatchError } from "../worktrunk/list";
 import { discoverRepos, readLinkedWorktrees, type LinkedWorktrees } from "./discovery";
 import { enrichRows } from "./enrich";
@@ -11,8 +12,30 @@ import {
   type RunningProcess,
   type SizeEntry,
   type SizeService,
+  type WorktreeFacts,
   type WorktreeRow,
 } from "../types";
+
+/**
+ * Facts a follow-up learned about the row `id`, which apply only while the row's HEAD is still `headSha`. A
+ * patch lasts across listings and rescans until a later follow-up returns one for the same row, so it should
+ * set every field it owns, null included.
+ */
+export interface RowPatch {
+  id: string;
+  headSha: string;
+  facts: Partial<Omit<WorktreeFacts, "id" | "kind" | "repoPath" | "path" | "headSha">>;
+}
+
+/**
+ * Runs once per scan after each repository's full listing, without holding the scan up, and patches its rows
+ * when it resolves. It gets the rows as listed, earlier patches applied; if it fails, they keep their facts.
+ */
+export type FollowUp = (
+  repo: string,
+  rows: WorktreeRow[],
+  signal: AbortSignal,
+) => Promise<RowPatch[]>;
 
 interface DashboardOptions {
   projectRoot: string;
@@ -32,6 +55,7 @@ interface DashboardOptions {
     paths: string[],
     signal: AbortSignal,
   ) => Promise<Record<string, RunningProcess[]>>;
+  followUp?: FollowUp;
 }
 
 export function createDashboardService(options: DashboardOptions): DashboardService {
@@ -42,9 +66,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
   const ticketByTask = new WeakMap<Promise<SizeEntry | null>, number>();
   let rowsByPath = new Map<string, WorktreeRow[]>();
   const completed = new Map<string, SizeEntry>();
+  const patches = new Map<string, RowPatch>();
   let completionTimer: ReturnType<typeof setTimeout> | null = null;
   const completionWaiters: Array<() => void> = [];
   let measurements = 0;
+  let checking = 0;
   let closed = false;
   let generation = 0;
   let snapshot: DashboardSnapshot = {
@@ -55,10 +81,11 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     errors: {},
     fatalError: null,
     sizing: [],
+    checking: 0,
     processes: {},
   };
 
-  function publish(next: Omit<DashboardSnapshot, "sizing">): void {
+  function publish(next: Omit<DashboardSnapshot, "sizing" | "checking">): void {
     if (next.rows !== snapshot.rows) {
       rowsByPath = new Map();
       for (const row of next.rows) {
@@ -68,7 +95,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         rowsByPath.set(row.path, rows);
       }
     }
-    snapshot = { ...next, sizing: [...runningByPath.keys()] };
+    snapshot = { ...next, sizing: [...runningByPath.keys()], checking };
     for (const listener of listeners) listener(snapshot);
   }
 
@@ -80,6 +107,15 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
     return rows.map((row) => {
       const cached = row.path === null ? null : options.sizeService.get(row.path);
       return cached ? { ...row, sizeKiB: cached.sizeKiB, sizeMeasuredAt: cached.measuredAt } : row;
+    });
+  }
+
+  function withPatches(rows: WorktreeRow[]): WorktreeRow[] {
+    if (!patches.size) return rows;
+    return rows.map((row) => {
+      const patch = patches.get(row.id);
+      if (!patch || patch.headSha !== row.headSha) return row;
+      return assessRow({ ...row, ...patch.facts });
     });
   }
 
@@ -263,15 +299,19 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             controller.signal,
           );
           if (result.exitCode !== 0 || !current(scanGeneration)) return;
-          const rows = await enrichRows(
-            repo,
-            withSizes(parseWorktrunk(repo, result.stdout).filter((row) => row.kind === "worktree")),
-            options.runner,
-            {
-              readCreated: options.readCreated,
-              readBranchCreated: options.readBranchCreated,
-              signal: controller.signal,
-            },
+          const rows = withPatches(
+            await enrichRows(
+              repo,
+              withSizes(
+                parseWorktrunk(repo, result.stdout).filter((row) => row.kind === "worktree"),
+              ),
+              options.runner,
+              {
+                readCreated: options.readCreated,
+                readBranchCreated: options.readBranchCreated,
+                signal: controller.signal,
+              },
+            ),
           );
           if (!current(scanGeneration)) return;
           scheduleSizes(rows, first.has(repo));
@@ -322,12 +362,14 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
             } else {
               let rows: WorktreeRow[];
               try {
-                rows = withSizes(
-                  await enrichRows(repo, parseWorktrunk(repo, result.stdout), options.runner, {
-                    readCreated: options.readCreated,
-                    readBranchCreated: options.readBranchCreated,
-                    signal: controller.signal,
-                  }),
+                rows = withPatches(
+                  withSizes(
+                    await enrichRows(repo, parseWorktrunk(repo, result.stdout), options.runner, {
+                      readCreated: options.readCreated,
+                      readBranchCreated: options.readBranchCreated,
+                      signal: controller.signal,
+                    }),
+                  ),
                 );
               } catch (error) {
                 if (!current(scanGeneration)) continue;
@@ -353,6 +395,7 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
                 ...snapshot,
                 rows: [...snapshot.rows.filter((row) => row.repoPath !== repo), ...rows],
               });
+              if (options.followUp) void followUp(options.followUp, repo, rows);
             }
           } catch (error) {
             if (!current(scanGeneration)) continue;
@@ -388,6 +431,28 @@ export function createDashboardService(options: DashboardOptions): DashboardServ
         });
         // After the listing, so the first rows never wait on it.
         if (options.findProcesses) await findProcesses(options.findProcesses);
+      }
+      async function followUp(
+        check: NonNullable<DashboardOptions["followUp"]>,
+        repo: string,
+        rows: WorktreeRow[],
+      ): Promise<void> {
+        const controller = new AbortController();
+        controllers.add(controller);
+        checking++;
+        publish(snapshot);
+        let learned: RowPatch[] = [];
+        try {
+          learned = await check(repo, rows, controller.signal);
+        } catch {
+          // The rows keep the facts their listing gave them.
+        }
+        controllers.delete(controller);
+        checking--;
+        if (closed) return;
+        const fresh = learned.length > 0 && current(scanGeneration);
+        for (const patch of fresh ? learned : []) patches.set(patch.id, patch);
+        publish({ ...snapshot, rows: fresh ? withPatches(snapshot.rows) : snapshot.rows });
       }
       async function findProcesses(
         find: NonNullable<DashboardOptions["findProcesses"]>,

@@ -1,9 +1,15 @@
-import { describe, expect, test } from "bun:test";
-import { assess, markerNote, MIN_AGE_MS } from "../src/core/assess";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { assess, assessRow, markerNote, MIN_AGE_MS } from "../src/core/assess";
 import { orphanRow } from "../src/core/scan/orphans";
 import { parseWorktrunk } from "../src/core/worktrunk/list";
 import fixture from "./fixtures/list-v2.json";
-import type { ChangeFlags, OrphanCause, WorktreeFacts } from "../src/core/types";
+import type {
+  ChangeFlags,
+  ForgeCheck,
+  OrphanCause,
+  WorktreeFacts,
+  WorktreeRow,
+} from "../src/core/types";
 
 const base = {
   ...parseWorktrunk("/repo", JSON.stringify(fixture))[0]!,
@@ -347,4 +353,242 @@ test("an orphan is judged by its cause alone, whatever its Git fields or agent m
   expect(
     assess({ ...row, prunable: true, marker: "🤖", markerSetAt: base.createdAt }, now),
   ).toEqual(assess(row, now));
+});
+
+// Merge dates read in local time.
+const zone = process.env.TZ;
+beforeAll(() => {
+  process.env.TZ = "UTC";
+});
+afterAll(() => {
+  process.env.TZ = zone;
+});
+
+describe("a forge check", () => {
+  const tip = "3f2c9a1e4b7d6c5a8f0e1d2c3b4a59687f6e5d4c";
+  const mergedAt = "2026-10-27T15:00:00Z";
+  const unmerged: Partial<WorktreeFacts> = {
+    headSha: tip,
+    mainAhead: 2,
+    integrationReason: null,
+    createdAt: createdBefore(60_000),
+  };
+  const proven = (
+    by: "commit" | "tree" | "stacked",
+    update: { tip?: string; mergedAt?: string } = {},
+  ): ForgeCheck => ({ kind: "proven", tip, pr: 60, mergedAt, base: "main", by, ...update });
+  const forged = (forge: ForgeCheck | undefined, update: Partial<WorktreeFacts> = {}) =>
+    assess({ ...base, ...unmerged, mainState: "ahead", ...update, forge }, now);
+
+  const states = [
+    ["ahead", "unmerged commits", "2 commits aren't in origin/main."],
+    [
+      "would_conflict",
+      "unmerged commits",
+      "2 commits aren't in origin/main, and merging would conflict.",
+    ],
+    ["diverged", "unmerged commits", "2 commits aren't in origin/main, which has also moved on."],
+    [
+      "behind",
+      "behind main",
+      "origin/main has moved ahead, and Worktrunk didn't confirm this branch is in it.",
+    ],
+  ] as const;
+  const unproven: [string, ForgeCheck | undefined, string | null][] = [
+    ["absent", undefined, null],
+    ["pending", { kind: "pending" }, "Checking GitHub…"],
+    ["offline", { kind: "unchecked", why: "offline" }, "Not checked against GitHub: offline."],
+    [
+      "gh-missing",
+      { kind: "unchecked", why: "gh-missing" },
+      "Not checked against GitHub: gh isn't installed.",
+    ],
+    [
+      "signed-out",
+      { kind: "unchecked", why: "signed-out" },
+      "Not checked against GitHub: gh isn't signed in.",
+    ],
+    ["no-github-remote", { kind: "unchecked", why: "no-github-remote" }, null],
+    [
+      "failed",
+      { kind: "unchecked", why: "failed" },
+      "Not checked against GitHub: GitHub didn't answer.",
+    ],
+    ["not-found", { kind: "not-found", tip }, "No merged pull request on GitHub has this commit."],
+    [
+      "not-found with a same-named PR",
+      { kind: "not-found", tip, samePr: { number: 27, mergedAt: "2026-10-26T09:00:00Z" } },
+      "PR #27 merged Oct 26 without this commit.",
+    ],
+  ];
+
+  describe.each(states)("on a %s worktree", (mainState, status, first) => {
+    test.each(unproven)("%s keeps it in Review", (_label, forge, note) => {
+      expect(forged(forge, { mainState })).toEqual({
+        status,
+        verdict: "Review",
+        reason: note ? `${first} ${note}` : first,
+        removalBlockReason: null,
+      });
+    });
+
+    test.each([
+      ["commit", "PR #60 merged Oct 27 with this exact commit."],
+      ["tree", "PR #60 merged Oct 27 with the same files."],
+      ["stacked", "PR #60 merged Oct 27 and brought in this commit from a stacked pull request."],
+    ] as const)("proven by %s makes it Safe", (by, reason) => {
+      expect(forged(proven(by), { mainState })).toEqual({
+        status: "merged on GitHub",
+        verdict: "Safe",
+        reason,
+        removalBlockReason: null,
+      });
+    });
+  });
+
+  test("a proven worktree is Safe at any age", () => {
+    for (const createdAt of [createdBefore(60_000), createdBefore(MIN_AGE_MS), null])
+      expect(forged(proven("commit"), { createdAt }).verdict).toBe("Safe");
+  });
+
+  test("a proven branch without a worktree is Safe only once a day old", () => {
+    const at = (createdAt: string | null) =>
+      assess(
+        { ...leftover, ...unmerged, mainState: "diverged", createdAt, forge: proven("tree") },
+        now,
+      );
+    expect(at(createdBefore(MIN_AGE_MS))).toEqual({
+      status: "merged on GitHub",
+      verdict: "Safe",
+      reason: "PR #60 merged Oct 27 with the same files.",
+      removalBlockReason: null,
+    });
+    expect(at(createdBefore(2 * 3_600_000))).toEqual({
+      status: "merged on GitHub",
+      verdict: "Review",
+      reason: "Created 2h ago, so it may still be in use.",
+      removalBlockReason: null,
+    });
+    expect([at(null).verdict, at(null).reason]).toEqual([
+      "Review",
+      "Its creation time is unknown, so it may still be in use.",
+    ]);
+  });
+
+  test("a recent agent mark turns a proven row back into Review", () => {
+    const worktree = forged(proven("commit"), marked("🤖", 20 * 60_000));
+    expect([worktree.status, worktree.verdict, worktree.reason]).toEqual([
+      "merged on GitHub",
+      "Review",
+      "An agent was working here 20m ago.",
+    ]);
+    const branchRow = assess(
+      {
+        ...leftover,
+        ...unmerged,
+        ...marked("💬", null),
+        createdAt: createdBefore(MIN_AGE_MS),
+        forge: proven("commit"),
+      },
+      now,
+    );
+    expect([branchRow.verdict, branchRow.reason]).toEqual([
+      "Review",
+      "An agent was waiting for input here; when is unknown.",
+    ]);
+    expect(forged(proven("commit"), marked("🤖", 2 * MIN_AGE_MS)).verdict).toBe("Safe");
+  });
+
+  test.each([
+    ["uncommitted changes", { changes: { ...base.changes!, modified: true } }],
+    ["unpushed commits", { upstreamAhead: 1 }],
+    ["locked", { locked: true, lockReason: "manual" }],
+    ["rebase in progress", { operation: "rebase" }],
+    ["unresolved conflicts", { changes: { ...base.changes!, conflicted: true } }],
+    ["folder missing", { prunable: true }],
+  ] as const)("%s outranks a proven check", (status, update) => {
+    const result = forged(proven("commit"), update);
+    expect(result.status).toBe(status);
+    expect(result).toEqual(forged(undefined, update));
+  });
+
+  test.each(["integrated", "empty", "same_commit", "orphan", null])(
+    "a %p main state ignores the forge check",
+    (mainState) => {
+      for (const forge of [proven("commit"), { kind: "not-found", tip } as const])
+        expect(forged(forge, { mainState })).toEqual(forged(undefined, { mainState }));
+    },
+  );
+
+  test("a check about another commit is ignored", () => {
+    const other = "0".repeat(40);
+    expect(forged(proven("commit", { tip: other }))).toEqual(forged(undefined));
+    expect(forged({ kind: "not-found", tip: other })).toEqual(forged(undefined));
+    expect(forged(proven("commit"), { headSha: null })).toEqual(
+      forged(undefined, { headSha: null }),
+    );
+  });
+
+  test("dates read in local time, with the year when it isn't this one", () => {
+    expect(forged(proven("commit", { mergedAt: "2025-12-30T10:00:00Z" })).reason).toBe(
+      "PR #60 merged Dec 30, 2025 with this exact commit.",
+    );
+    expect(forged(proven("commit", { mergedAt: "not a date" })).reason).toBe(
+      "PR #60 merged with this exact commit.",
+    );
+    process.env.TZ = "Asia/Tokyo";
+    try {
+      expect(forged(proven("commit", { mergedAt: "2026-10-27T20:00:00Z" })).reason).toBe(
+        "PR #60 merged Oct 28 with this exact commit.",
+      );
+    } finally {
+      process.env.TZ = "UTC";
+    }
+  });
+});
+
+describe("assessRow", () => {
+  const tip = "3f2c9a1e4b7d6c5a8f0e1d2c3b4a59687f6e5d4c";
+  const row: WorktreeRow = {
+    ...base,
+    headSha: tip,
+    mainState: "ahead",
+    mainAhead: 1,
+    sizeKiB: 2048,
+    sizeMeasuredAt: "2026-10-28T11:00:00Z",
+    verdict: "Review",
+    reason: "1 commit isn't in origin/main.",
+  };
+
+  test("recomputes the verdict and reason from the facts and keeps the rest", () => {
+    const pending = { ...row, forge: { kind: "pending" } as const };
+    expect(assessRow(pending, now)).toEqual({
+      ...pending,
+      reason: "1 commit isn't in origin/main. Checking GitHub…",
+    });
+    expect(pending.reason).toBe("1 commit isn't in origin/main.");
+  });
+
+  test("settles a row once a forge proof arrives", () => {
+    const forge: ForgeCheck = {
+      kind: "proven",
+      tip,
+      pr: 60,
+      mergedAt: "2026-10-27T15:00:00Z",
+      base: "main",
+      by: "commit",
+    };
+    expect(assessRow({ ...row, forge }, now)).toEqual({
+      ...row,
+      forge,
+      verdict: "Safe",
+      reason: "PR #60 merged Oct 27 with this exact commit.",
+    });
+  });
+
+  test("gives facts without a row the verdict and reason assess gives them", () => {
+    const facts: WorktreeFacts = { ...base, mainState: "diverged" };
+    const { verdict, reason } = assess(facts, now);
+    expect(assessRow(facts, now)).toEqual({ ...facts, verdict, reason });
+  });
 });

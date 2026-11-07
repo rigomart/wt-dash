@@ -64,6 +64,8 @@ export interface LogLine {
   flags: string[];
   exitCode: number;
   branchOutcome: string | null;
+  /** The pull request that proved the branch merged, when that is why it was force-deleted. */
+  branchProof?: { pr: number };
   error: string | null;
 }
 

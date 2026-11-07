@@ -19,6 +19,7 @@ To forget them, delete ~/.local/state/wt-dash/repos.json (in $XDG_STATE_HOME whe
 Options:
   --depth <number>    Folder levels to search below each root (0–20; default: 2)
   --wt-path <path>    Use a specific Worktrunk executable
+  --offline          Don't ask GitHub about merged pull requests
   --doctor           Check scan folders, Git, and Worktrunk without opening the UI
   -h, --help         Show this help
   -v, --version      Show the version
@@ -37,6 +38,8 @@ export interface CliOptions {
   defaults: boolean;
   depth: number;
   wtPath?: string;
+  /** Don't run `gh` to ask GitHub whether a merged pull request contains a commit. */
+  offline: boolean;
 }
 
 export function expandPath(path: string, home: string, cwd: string): string {
@@ -45,7 +48,7 @@ export function expandPath(path: string, home: string, cwd: string): string {
 }
 
 export function parseArgs(args: string[], home: string, cwd: string): CliOptions {
-  const options: CliOptions = { mode: "run", roots: [], defaults: false, depth: 2 };
+  const options: CliOptions = { mode: "run", roots: [], defaults: false, depth: 2, offline: false };
   let positional = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
@@ -63,6 +66,10 @@ export function parseArgs(args: string[], home: string, cwd: string): CliOptions
     }
     if (!positional && arg === "--doctor") {
       options.mode = "doctor";
+      continue;
+    }
+    if (!positional && arg === "--offline") {
+      options.offline = true;
       continue;
     }
     if (!positional && (arg === "--depth" || arg === "--wt-path")) {

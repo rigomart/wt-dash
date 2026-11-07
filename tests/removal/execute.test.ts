@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fixture from "../fixtures/list-v2.json";
 import { parseWorktrunk } from "../../src/core/worktrunk/list";
+import { assessRow } from "../../src/core/assess";
 import {
   aged,
+  aheadPayload,
+  aheadRow,
   branchOnly,
   branchRemoved,
   branchRow,
@@ -14,6 +17,7 @@ import {
   detachedRow,
   fakeRepos,
   payloadB,
+  proven,
   removed,
   repo,
   repoB,
@@ -639,4 +643,73 @@ test("a branch Worktrunk keeps counts as not removed", async () => {
     branchOutcome: "retained_unmerged",
     error: "Worktrunk kept the branch (retained unmerged)",
   });
+});
+
+test("a worktree proven merged on GitHub is removed with -D for that row alone, and the log names its PR", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dash-action-"));
+  try {
+    const row = aheadRow(proven("bbb"));
+    const { calls, runner } = fakeRepos({ payloads: { [repo]: aheadPayload() } });
+    const actions = createActionService({ wtPath: "/wt", runner, logPath: join(directory, "log") });
+    const plan = await actions.prepareRemoval([row, detachedRow]);
+    expect(plan.entries.map((entry) => [entry.branchWillBeRetained, entry.branchProof])).toEqual([
+      [false, { pr: 60 }],
+      [false, undefined],
+    ]);
+    const result = await actions.executeRemoval(plan, {
+      [row.id]: { include: true },
+      [detachedRow.id]: { include: true },
+    });
+    expect(result.items.map((item) => item.status)).toEqual(["removed", "removed"]);
+    const removals = calls.filter((call) => call.includes("remove")).map((call) => call.slice(-2));
+    expect(removals).toEqual([
+      ["-D", row.path!],
+      ["--format=json", detachedRow.path!],
+    ]);
+    const log = (await readFile(join(directory, "log"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(log.map(({ path, flags, branchProof }) => ({ path, flags, branchProof }))).toEqual([
+      { path: row.path, flags: ["-D"], branchProof: { pr: 60 } },
+      { path: detachedRow.path, flags: [], branchProof: undefined },
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a worktree whose GitHub proof is for an earlier tip is removed without -D", async () => {
+  const row = { ...aheadRow(), forge: proven("earlier") };
+  const { calls, runner } = fakeRepos({ payloads: { [repo]: aheadPayload() } });
+  const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null" });
+  const plan = await actions.prepareRemoval([row]);
+  expect(plan.entries[0]).toMatchObject({ branchWillBeRetained: true, row: { verdict: "Review" } });
+  await actions.executeRemoval(plan, { [row.id]: { include: true } });
+  expect(calls.find((call) => call.includes("remove"))?.slice(-2)).toEqual([
+    "--format=json",
+    row.path!,
+  ]);
+});
+
+test("a branch without a worktree proven merged on GitHub is deleted without pressing D", async () => {
+  const payload = withBranch("ahead");
+  const row = assessRow({ ...branchOnly(payload), forge: proven("old-sha", 61) });
+  expect(row.verdict).toBe("Safe");
+  const { calls, runner } = fakeRepos({
+    payloads: { [repo]: payload },
+    tips: { "refs/heads/old": "old-sha" },
+    removeOutput: () => branchRemoved(),
+  });
+  const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+  const plan = await actions.prepareRemoval([row]);
+  expect(plan.entries[0]).toMatchObject({
+    blockedReason: null,
+    branchWillBeRetained: false,
+    branchProof: { pr: 61 },
+    row: { verdict: "Safe" },
+  });
+  const result = await actions.executeRemoval(plan, { [row.id]: { include: true } });
+  expect(result.items).toEqual([{ id: row.id, status: "removed", branchOutcome: "deleted" }]);
+  expect(calls.find((call) => call.includes("remove"))?.slice(-2)).toEqual(["-D", "old"]);
 });

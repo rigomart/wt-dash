@@ -1,4 +1,4 @@
-import { assess, recentAgentMark } from "../assess";
+import { assessRow, recentAgentMark, removalBlockReason } from "../assess";
 import { readFiles } from "../git/status";
 import type { WorktreeState } from "../git/worktrees";
 import { failure } from "../process";
@@ -71,8 +71,33 @@ export async function listRepo(
     readBranchCreated: options.readBranchCreated,
   });
 }
+/** The states in which assess lets a merged pull request stand in for Worktrunk's merge check. */
+const forgeStates = ["ahead", "would_conflict", "diverged", "behind"];
+
+/** The pull request GitHub says merged the row's tip, or null when no proof holds for its current tip. */
+function provenBy(row: WorktreeRow): { pr: number } | null {
+  const forge = row.forge;
+  return forge?.kind === "proven" &&
+    forge.tip === row.headSha &&
+    forgeStates.includes(row.mainState ?? "")
+    ? { pr: forge.pr }
+    : null;
+}
+
 export function matchListing(row: WorktreeRow, listing: WorktreeRow[]): RemovalEntry {
-  const fresh = listing.find((item) => item.id === row.id);
+  const listed = listing.find((item) => item.id === row.id);
+  // `wt list` knows nothing of GitHub, so the confirmed row's answer carries over while the tip is the same.
+  const fresh =
+    listed && row.forge && listed.headSha === row.headSha
+      ? { ...listed, forge: row.forge }
+      : listed;
+  // Worktrunk deletes a branch whenever an integration check matched, but a dirty worktree
+  // shows that match as "behind" or "diverged" rather than "integrated".
+  const unmerged =
+    row.branch !== null &&
+    !row.integrationReason &&
+    !["empty", "integrated", "same_commit"].includes(row.mainState ?? "");
+  const proof = unmerged ? provenBy(row) : null;
   const blockedReason = !fresh
     ? row.kind === "branch"
       ? "it is missing or now has a worktree"
@@ -87,23 +112,12 @@ export function matchListing(row: WorktreeRow, listing: WorktreeRow[]): RemovalE
     ignoredFiles: [],
     disposableIgnored: 0,
     requiresDiscard: false,
-    // Worktrunk deletes a branch whenever an integration check matched, but a dirty worktree
-    // shows that match as "behind" or "diverged" rather than "integrated".
-    branchWillBeRetained:
-      row.branch !== null &&
-      !row.integrationReason &&
-      !["empty", "integrated", "same_commit"].includes(row.mainState ?? ""),
+    branchWillBeRetained: unmerged && !proof,
+    ...(proof ? { branchProof: proof } : {}),
   };
   if (blockedReason) return entry;
-  const assessment = assess(fresh!);
-  entry.row = {
-    ...fresh!,
-    sizeKiB: row.sizeKiB,
-    sizeMeasuredAt: row.sizeMeasuredAt,
-    verdict: assessment.verdict,
-    reason: assessment.reason,
-  };
-  entry.blockedReason = assessment.removalBlockReason;
+  entry.row = assessRow({ ...fresh!, sizeKiB: row.sizeKiB, sizeMeasuredAt: row.sizeMeasuredAt });
+  entry.blockedReason = removalBlockReason(entry.row);
   return entry;
 }
 export async function checkAgainst(

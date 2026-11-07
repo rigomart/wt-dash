@@ -5,6 +5,7 @@ import { join } from "node:path";
 import fixture from "../fixtures/list-v2.json";
 import { parseWorktrunk } from "../../src/core/worktrunk/list";
 import {
+  aheadRow,
   branchRow,
   branchRowB,
   commandResult,
@@ -12,6 +13,7 @@ import {
   detachedRowB,
   fakeRepos,
   noNewCommits,
+  proven,
   removed,
   repo,
   repoB,
@@ -222,3 +224,40 @@ test.each([
     expect(matchListing(row, [row]).branchWillBeRetained).toBe(retained);
   },
 );
+
+test("a row proven merged on GitHub stays Safe in the preview, and its branch is deleted for its PR", () => {
+  const row = aheadRow(proven("bbb"));
+  expect(row.verdict).toBe("Safe");
+  const listed = aheadRow();
+  expect(listed.forge).toBeUndefined();
+  const entry = matchListing(row, [listed]);
+  expect(entry).toMatchObject({
+    blockedReason: null,
+    branchWillBeRetained: false,
+    branchProof: { pr: 60 },
+    row: { verdict: "Safe", forge: proven("bbb") },
+  });
+  expect(entry.row.reason).toStartWith("PR #60 merged ");
+});
+
+test.each([
+  ["answers for an earlier tip", { ...aheadRow(), forge: proven("earlier") }],
+  ["found no merged PR", aheadRow({ kind: "not-found", tip: "bbb" })],
+  [
+    "proves a branch that shares no history with main",
+    { ...aheadRow(proven("bbb")), mainState: "orphan" },
+  ],
+])("a row whose GitHub check %s keeps its branch unless D is pressed", (_name, row) => {
+  const entry = matchListing(row, [{ ...row, forge: undefined }]);
+  expect(entry.blockedReason).toBeNull();
+  expect(entry.branchWillBeRetained).toBe(true);
+  expect(entry.branchProof).toBeUndefined();
+  expect(entry.row.verdict).toBe("Review");
+});
+
+test("a proven row whose tip moved since confirmation is skipped, and the proof doesn't carry to the new tip", () => {
+  const moved = { ...aheadRow(), headSha: "moved" };
+  const entry = matchListing(aheadRow(proven("bbb")), [moved]);
+  expect(entry.blockedReason).toBe("it changed; refresh and preview again");
+  expect(entry.row.forge).toBeUndefined();
+});

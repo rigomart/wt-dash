@@ -45,6 +45,51 @@ export type OrphanCause =
   /** A Codex `<id>` folder holding only `.codex-worktree-name`, with no worktree inside. */
   | { kind: "emptyShell" };
 
+/** Why GitHub wasn't asked about a row's tip. `failed` means gh returned an error or timed out. */
+export type ForgeUncheckedReason =
+  | "offline"
+  | "gh-missing"
+  | "signed-out"
+  | "no-github-remote"
+  | "failed";
+
+/**
+ * How a merged pull request holds the tip. `commit`: the tip is a commit of a PR merged into the default
+ * branch, possibly an earlier one than the PR's last. `tree`: the tip's tree equals the tree of a commit in
+ * such a PR. `stacked`: the tip is in a PR merged into another branch, which PR `pr` then merged into the
+ * default branch.
+ */
+export type ForgeProofKind = "commit" | "tree" | "stacked";
+
+/** A merged pull request that holds the tip. */
+export interface ForgeProof {
+  kind: "proven";
+  /** The 40-hex commit GitHub was asked about. */
+  tip: string;
+  /** The pull request merged into the default branch. */
+  pr: number;
+  /** When PR `pr` was merged, as an ISO 8601 time. */
+  mergedAt: string;
+  /** The branch PR `pr` merged into. */
+  base: string;
+  by: ForgeProofKind;
+}
+
+/**
+ * What GitHub says about whether the row's tip reached the default branch through a merged pull request.
+ * A `proven` or `not-found` answer counts only while its `tip` is still the row's `headSha`.
+ */
+export type ForgeCheck =
+  | { kind: "pending" }
+  | { kind: "unchecked"; why: ForgeUncheckedReason }
+  | ForgeProof
+  | {
+      kind: "not-found";
+      tip: string;
+      /** A merged PR from a branch of the same name that doesn't hold the tip. */
+      samePr?: { number: number; mergedAt: string };
+    };
+
 export interface WorktreeFacts {
   id: string;
   kind: RowKind;
@@ -67,6 +112,8 @@ export interface WorktreeFacts {
   tool: ToolName;
   changes: ChangeFlags | null;
   upstreamAhead: number | null;
+  /** The name of the upstream branch on its remote, which may differ from `branch`; null without one. */
+  upstreamBranch?: string | null;
   mainState: string | null;
   integrationReason?: string | null;
   lockReason: string | null;
@@ -87,6 +134,8 @@ export interface WorktreeFacts {
   operation: string | null;
   /** Set only on an orphan row. */
   orphan?: OrphanCause;
+  /** GitHub's answer for the tip, consulted only when Worktrunk can't show the branch is merged. */
+  forge?: ForgeCheck;
 }
 
 export interface WorktreeRow extends WorktreeFacts {
@@ -164,6 +213,8 @@ export interface DashboardSnapshot {
   fatalError: string | null;
   /** Worktree folders whose size is being measured right now. */
   sizing: string[];
+  /** Follow-ups started after a repository's listing that haven't finished yet. */
+  checking: number;
   /** Processes running inside each row's folder, keyed by the folder, as of the last completed scan. */
   processes: Record<string, RunningProcess[]>;
 }

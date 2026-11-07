@@ -1,9 +1,23 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve, sep } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { createServices } from "../../src/app";
 import type { ActionService } from "../../src/core/removal/types";
+import type { GitHubOptions } from "../../src/core/github/check";
+import type { FollowUp } from "../../src/core/scan/dashboard";
 import { discoverRepos, readCreatedAt, type RepoSource } from "../../src/core/scan/discovery";
 import type {
   CommandResult,
@@ -14,6 +28,7 @@ import type {
   Verdict,
   WorktreeRow,
 } from "../../src/core/types";
+import { createFakeGh, type FakeGh, GH_LOG_ENV, GH_STATE_ENV, type GhCommit } from "./gh";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How old builders make anything that must be older than a day, unless told otherwise. */
@@ -44,6 +59,29 @@ export interface Built {
   expected: Expected;
   /** KiB written into the worktree, for `sizedWorktree`; `du` reports at least this. */
   minSizeKiB?: number;
+  /** For the `pr…` builders: the pull requests recorded in the fake GitHub, and the verdict once it's asked. */
+  github?: GitHubExpected;
+}
+
+/** What the fake GitHub holds for a built row, and how the dashboard should judge the row once it asks. */
+export interface GitHubExpected {
+  /** The merged pull requests the builder recorded, in merge order. */
+  pullRequests: number[];
+  /** Safe when GitHub shows the row's tip merged into the default branch; Review when it doesn't. */
+  verdict: Verdict;
+}
+
+/** The owner of every fixture repo given a GitHub remote. */
+export const GITHUB_OWNER = "acme";
+
+/** A repo's `origin`: a github.com URL that Git rewrites to a local bare repo with `url.<bare>.insteadOf`. */
+export interface GitHubRemote {
+  owner: string;
+  name: string;
+  /** `https://github.com/<owner>/<name>.git`, what Worktrunk and `git config remote.origin.url` see. */
+  url: string;
+  /** The bare repository Git fetches from and pushes to. */
+  bare: string;
 }
 
 export interface ExecOptions {
@@ -53,6 +91,13 @@ export interface ExecOptions {
 }
 
 export type SavedRepos = NonNullable<Parameters<typeof createServices>[0]["savedRepos"]>;
+export type { FollowUp, GitHubOptions };
+
+/** The app's `github` option that asks the sandbox's fake GitHub, or finds no `gh` when the sandbox has none. */
+export const online = (sandbox: Sandbox): GitHubOptions => ({
+  offline: false,
+  ghPath: sandbox.gh.installed ? join(sandbox.gh.bin, "gh") : null,
+});
 
 export interface Services {
   dashboard: DashboardService;
@@ -103,6 +148,45 @@ export interface Repo {
   mergedBranch(branch: string, options?: { ageMs?: number }): Promise<Built>;
   /** A branch with a commit not in main whose worktree was removed: Review. */
   unmergedBranch(branch: string): Promise<Built>;
+  /** The GitHub `origin` from `repo(name, { github: true })`, or null. */
+  github: GitHubRemote | null;
+  /*
+   * The `pr…` builders need the GitHub remote. Each pushes its branch, merges a pull request on the fake
+   * GitHub the way GitHub's squash merge does, pushes main, and deletes the remote branch, leaving its
+   * upstream gone. Main moves a line near the change while the pull request is open, and changes the branch's
+   * line again after the merge, so Worktrunk shows unmerged commits that would conflict and finds no
+   * integration: Review. Only GitHub can tell; `github.verdict` is the verdict once the dashboard asks it.
+   */
+  /** A worktree whose tip GitHub squash-merged into main: Safe once GitHub is asked. */
+  prMergedWorktree(branch: string): Promise<Built>;
+  /** A branch, its worktree removed, created `ageMs` ago, whose tip GitHub squash-merged: Safe once asked. */
+  prMergedBranch(branch: string, options?: { ageMs?: number }): Promise<Built>;
+  /** A worktree whose tip is an earlier commit of a merged pull request that got one more: Safe once asked. */
+  prMergedEarlierCommit(branch: string): Promise<Built>;
+  /**
+   * A worktree rebased here after its pull request was rebased on GitHub too, so GitHub lacks the tip but a
+   * merged commit has the same tree: Safe once asked.
+   */
+  prTreeMatch(branch: string): Promise<Built>;
+  /** A worktree with a commit made after its pull request merged, which GitHub lacks: still Review. */
+  prMissingCommit(branch: string): Promise<Built>;
+  /**
+   * A worktree whose pushed tip was force-pushed away from its pull request before the pull request merged
+   * other work. GitHub still associates the tip with the merged pull request, but its commits don't include
+   * it: still Review.
+   */
+  prForcePushedAway(branch: string): Promise<Built>;
+  /**
+   * A worktree whose tip is only in a pull request that is still open, or `closed` without merging. Its branch
+   * is still on GitHub and main hasn't moved, so Worktrunk shows one unmerged commit: still Review.
+   */
+  prUnmerged(branch: string, options: { state: "OPEN" | "CLOSED" }): Promise<Built>;
+  /**
+   * A worktree whose tip was merged into `base` with a merge commit by one pull request, then `base` squash-merged
+   * into main by a second, whose commits include the tip; `base` has a commit of its own and no local branch.
+   * Safe once asked.
+   */
+  prStacked(branch: string, options?: { base?: string }): Promise<Built>;
 }
 
 export interface Sandbox {
@@ -110,8 +194,13 @@ export interface Sandbox {
   home: string;
   /** Where repositories live; pass it to the dashboard as the project root. */
   scanRoot: string;
-  /** The complete environment commands run with; only PATH comes from process.env, with wt's folder first. */
+  /**
+   * The complete environment commands run with. Only PATH comes from process.env: wt's folder first, then
+   * the developer's PATH without the real `gh`, and the fake `gh` before both unless it's missing.
+   */
   env: Record<string, string>;
+  /** The fake GitHub CLI and the GitHub it answers from. */
+  gh: FakeGh;
   wtPath: string;
   /** `<home>/.cache/wt-dash`, where the app keeps sizes.json and removals.log. */
   cacheDir: string;
@@ -132,16 +221,24 @@ export interface Sandbox {
   git(cwd: string, ...args: string[]): Promise<string>;
   /** Runs Worktrunk in `cwd` and returns trimmed stdout; throws on a non-zero exit. */
   wt(cwd: string, ...args: string[]): Promise<string>;
-  /** Creates `<scanRoot>/<name>` with one commit on main. */
-  repo(name: string): Promise<Repo>;
+  /**
+   * Creates `<scanRoot>/<name>` with one commit on main. `github` adds an `origin` at
+   * `https://github.com/acme/<name>.git` that Git rewrites to a local bare repo, pushes main to it with main
+   * tracking `origin/main`, and adds the repo to the fake GitHub.
+   */
+  repo(name: string, options?: { github?: boolean }): Promise<Repo>;
   /**
    * Dashboard, action and size services on the sandbox; `cleanup` closes any still open. `runner` replaces the
-   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root.
+   * sandbox runner, for wrappers from tests/support/runners.ts. `sources` replaces the scan root. `github` is
+   * the app's option, offline when omitted; `online(sandbox)` asks the fake GitHub. `followUp` replaces the GitHub
+   * check after each repository's listing.
    */
   services(options?: {
     runner?: CommandRunner;
     sources?: RepoSource[];
     savedRepos?: SavedRepos;
+    github?: GitHubOptions;
+    followUp?: FollowUp;
   }): Promise<Services>;
   /** Closes services, removes every worktree of the sandbox's repos, then the sandbox. Safe to call twice. */
   cleanup(): Promise<void>;
@@ -213,12 +310,42 @@ async function birthMovesWithMtime(root: string): Promise<boolean> {
   return Math.abs(birthtimeMs - old.getTime()) < 1000;
 }
 
+const isGh = (name: string) => name.toLowerCase() === "gh";
+
+/**
+ * `folders`, in order and without repeats, with no `gh` in any: each folder holding one is replaced by a folder
+ * under `root` of links to everything else in it. Every other tool resolves as before, wherever it's installed
+ * (on GitHub's Linux runners `gh` sits in /usr/bin beside everything else). Empty and relative entries, which
+ * name the working folder, are dropped.
+ */
+async function withoutGh(folders: string[], root: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const folder of new Set(folders)) {
+    if (!isAbsolute(folder)) continue;
+    // lstat finds a broken link too, and matches a "GH" on a case-insensitive file system as exec would.
+    const hasGh = await lstat(join(folder, "gh")).then(
+      () => true,
+      () => false,
+    );
+    if (!hasGh) {
+      out.push(folder);
+      continue;
+    }
+    const mirror = join(root, "path", String(out.length));
+    await mkdir(mirror, { recursive: true });
+    const names = (await readdir(folder)).filter((name) => !isGh(name));
+    await Promise.all(names.map((name) => symlink(join(folder, name), join(mirror, name))));
+    out.push(mirror);
+  }
+  return out;
+}
+
 /**
  * Creates an isolated world in a fresh temp folder, or in `root`, which must not exist yet. Call `cleanup` when
- * done.
+ * done. `gh` puts the fake GitHub CLI on PATH (the default) or leaves PATH with no `gh` at all.
  */
 export async function createSandbox(
-  options: { wtPath?: string; root?: string } = {},
+  options: { wtPath?: string; root?: string; gh?: "fake" | "missing" } = {},
 ): Promise<Sandbox> {
   const wtPath = options.wtPath ?? resolveWtPath();
   if (!Bun.which("git")) throw new Error("Git was not found on PATH.");
@@ -234,7 +361,8 @@ export async function createSandbox(
   const config = join(home, ".config");
   const template = join(root, "git-template");
   const env: Record<string, string> = {
-    PATH: [dirname(wtPath), process.env.PATH ?? "/usr/bin:/bin"].join(delimiter),
+    // Set once the sandbox folder exists.
+    PATH: "",
     HOME: home,
     TMPDIR: join(root, "tmp"),
     LC_ALL: "C",
@@ -255,7 +383,16 @@ export async function createSandbox(
     WORKTRUNK_APPROVALS_PATH: join(config, "worktrunk", "approvals.toml"),
   };
   let backdatesOnDisk: boolean;
+  let gh: FakeGh;
   try {
+    gh = await createFakeGh(join(root, "gh"), options.gh !== "missing");
+    const developerPath = (process.env.PATH ?? "/usr/bin:/bin").split(delimiter);
+    env.PATH = [
+      ...(gh.installed ? [gh.bin] : []),
+      ...(await withoutGh([dirname(wtPath), ...developerPath], root)),
+    ].join(delimiter);
+    env[GH_STATE_ENV] = gh.statePath;
+    env[GH_LOG_ENV] = gh.logPath;
     for (const folder of [home, scanRoot, worktrees, template, join(root, "tmp")])
       await mkdir(folder, { recursive: true });
     await mkdir(join(config, "worktrunk"), { recursive: true });
@@ -324,7 +461,7 @@ export async function createSandbox(
     return new Date(forced).toISOString();
   }
 
-  async function repo(name: string): Promise<Repo> {
+  async function repo(name: string, { github = false } = {}): Promise<Repo> {
     const path = join(scanRoot, name);
     await git(scanRoot, "init", "-q", path);
     repos.push(path);
@@ -333,7 +470,23 @@ export async function createSandbox(
     await writeFile(join(path, ".git", "info", "exclude"), "node_modules/\ndist/\n");
     await git(path, "add", "README.md");
     await git(path, "commit", "-q", "-m", "Initial commit");
+    let remote: GitHubRemote | null = null;
+    if (github) {
+      remote = {
+        owner: GITHUB_OWNER,
+        name,
+        url: `https://github.com/${GITHUB_OWNER}/${name}.git`,
+        bare: join(root, "remotes", `${name}.git`),
+      };
+      await git(root, "init", "-q", "--bare", remote.bare);
+      await git(path, "remote", "add", "origin", remote.url);
+      await git(path, "config", `url.${remote.bare}.insteadOf`, remote.url);
+      await git(path, "push", "-q", "-u", "origin", "main");
+      await git(path, "remote", "set-head", "origin", "main");
+      await gh.addRepo(remote.owner, remote.name, "main");
+    }
     let pinnedBy: string | null = null;
+    let pullRequests = 0;
 
     const dated = (ageMs: number): Record<string, string> => {
       const date = `@${Math.floor((Date.now() - ageMs) / 1000)} +0000`;
@@ -400,9 +553,99 @@ export async function createSandbox(
     }
     const squashReason = "Merging it into main would change nothing.";
 
+    // The `pr…` builders' file: nine numbered lines. The branch changes CHANGED and main moves NEAR, which is
+    // inside the diff's context but leaves a line between them, so Git merges the two without a conflict.
+    const CHANGED = 6;
+    const NEAR = 4;
+    const toGitHub = (builder: string): GitHubRemote => {
+      if (!remote)
+        throw new Error(
+          `${name}: ${builder} needs a GitHub remote; make the repo with { github: true }`,
+        );
+      return remote;
+    };
+    async function editLine(
+      cwd: string,
+      file: string,
+      line: number,
+      text: string,
+      env?: Record<string, string>,
+    ) {
+      const lines = (await readFile(join(cwd, file), "utf8")).split("\n");
+      lines[line - 1] = text;
+      await commit(cwd, file, lines.join("\n"), env);
+    }
+    const head = (cwd: string) => git(cwd, "rev-parse", "HEAD");
+    const described = (oids: string[]): Promise<GhCommit[]> =>
+      Promise.all(
+        oids.map(async (oid) => ({ oid, tree: await git(path, "rev-parse", `${oid}^{tree}`) })),
+      );
+    async function pullRequestFile(branch: string): Promise<string> {
+      const file = `${slug(branch)}.pr.txt`;
+      const lines = Array.from({ length: 9 }, (_, index) => `line ${index + 1}`);
+      await commit(path, file, `${lines.join("\n")}\n`);
+      return file;
+    }
+    /** Adds the builder's file to main, then a worktree whose one commit changes it, pushed with upstream. */
+    async function pullRequestBranch(branch: string, env?: Record<string, string>) {
+      const file = await pullRequestFile(branch);
+      const worktree = await add(branch, env);
+      await editLine(worktree, file, CHANGED, branch, env);
+      await check("git", ["push", "-q", "-u", "origin", branch], { cwd: worktree, env });
+      return { file, worktree, tip: await head(worktree) };
+    }
+    /**
+     * Merges `pr.head` into main as GitHub's squash merge does, records the pull request, pushes main and
+     * deletes the remote branch, as GitHub does after a merge, and returns its number.
+     */
+    async function mergePullRequest(
+      file: string,
+      pr: { headRefName: string; head: string; commits: string[]; forcePushed?: string[] },
+    ): Promise<number> {
+      const github = toGitHub("mergePullRequest");
+      const number = ++pullRequests;
+      // Main moves on near the change while the pull request is open, so the squash's patch differs.
+      await editLine(path, file, NEAR, `main moved during #${number}`);
+      const tree = (await git(path, "merge-tree", "--write-tree", "main", pr.head)).split("\n")[0]!;
+      const squash = await git(
+        path,
+        "commit-tree",
+        tree,
+        "-p",
+        "main",
+        "-m",
+        `${pr.headRefName} (#${number})`,
+      );
+      await git(path, "merge", "-q", "--ff-only", squash);
+      // And changes the same line afterwards, so merging the branch would conflict.
+      await editLine(path, file, CHANGED, `changed again after #${number}`);
+      await git(path, "push", "-q", "origin", "main");
+      await gh.addPullRequest(github.owner, github.name, {
+        number,
+        mergedAt: new Date().toISOString(),
+        base: "main",
+        headRefName: pr.headRefName,
+        headRefOid: pr.head,
+        commits: await described(pr.commits),
+        ...(pr.forcePushed ? { forcePushed: await described(pr.forcePushed) } : {}),
+      });
+      await git(path, "push", "-q", "origin", "--delete", pr.headRefName);
+      await git(path, "fetch", "-q", "--prune", "origin");
+      return number;
+    }
+    const unprovable = (commits: number) => ({
+      verdict: "Review" as const,
+      status: "unmerged commits",
+      reason: `${commits === 1 ? "1 commit isn't" : `${commits} commits aren't`} in main, and merging would conflict.`,
+    });
+    const onGitHub = (pullRequests: number[], verdict: Verdict) => ({
+      github: { pullRequests, verdict },
+    });
+
     return {
       name,
       path,
+      github: remote,
       git: (...args) => git(path, ...args),
       async mergedWorktree(branch, { ageMs = OLD_AGE_MS } = {}) {
         movesMain("mergedWorktree");
@@ -593,11 +836,177 @@ export async function createSandbox(
           reason: "1 commit isn't in main.",
         });
       },
+      async prMergedWorktree(branch) {
+        movesMain("prMergedWorktree");
+        toGitHub("prMergedWorktree");
+        const { file, worktree, tip } = await pullRequestBranch(branch);
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: tip,
+          commits: [tip],
+        });
+        return { ...built(branch, worktree, unprovable(1)), ...onGitHub([number], "Safe") };
+      },
+      async prMergedBranch(branch, { ageMs = OLD_AGE_MS } = {}) {
+        movesMain("prMergedBranch");
+        toGitHub("prMergedBranch");
+        const { file, worktree, tip } = await pullRequestBranch(branch, dated(ageMs));
+        await git(path, "worktree", "remove", worktree);
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: tip,
+          commits: [tip],
+        });
+        return {
+          ...built(branch, null, unprovable(1)),
+          ...onGitHub([number], ageMs < DAY_MS ? "Review" : "Safe"),
+        };
+      },
+      async prMergedEarlierCommit(branch) {
+        movesMain("prMergedEarlierCommit");
+        toGitHub("prMergedEarlierCommit");
+        const { file, worktree, tip } = await pullRequestBranch(branch);
+        // One more commit, pushed from elsewhere: made here, then dropped, so no ref here reaches it.
+        await editLine(worktree, file, CHANGED, `${branch}, revised in review`);
+        const later = await head(worktree);
+        await git(worktree, "reset", "-q", "--hard", tip);
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: later,
+          commits: [tip, later],
+        });
+        return { ...built(branch, worktree, unprovable(1)), ...onGitHub([number], "Safe") };
+      },
+      async prTreeMatch(branch) {
+        movesMain("prTreeMatch");
+        toGitHub("prTreeMatch");
+        const { file, worktree } = await pullRequestBranch(branch);
+        await editLine(path, file, NEAR, "main moved before the rebase");
+        await git(worktree, "rebase", "-q", "main");
+        // GitHub's "Update branch" rebased the pull request too: the same files in a commit of its own.
+        const rebasedOnGitHub = await check(
+          "git",
+          ["commit-tree", `${await head(worktree)}^{tree}`, "-p", "main", "-m", `Change ${branch}`],
+          {
+            cwd: path,
+            env: { GIT_COMMITTER_NAME: "GitHub", GIT_COMMITTER_EMAIL: "noreply@github.com" },
+          },
+        );
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: rebasedOnGitHub,
+          commits: [rebasedOnGitHub],
+        });
+        return { ...built(branch, worktree, unprovable(1)), ...onGitHub([number], "Safe") };
+      },
+      async prMissingCommit(branch) {
+        movesMain("prMissingCommit");
+        toGitHub("prMissingCommit");
+        const { file, worktree, tip } = await pullRequestBranch(branch);
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: tip,
+          commits: [tip],
+        });
+        await editLine(worktree, file, 9, `${branch}, after the merge`);
+        return { ...built(branch, worktree, unprovable(2)), ...onGitHub([number], "Review") };
+      },
+      async prForcePushedAway(branch) {
+        movesMain("prForcePushedAway");
+        toGitHub("prForcePushedAway");
+        const { file, worktree, tip } = await pullRequestBranch(branch);
+        // Other work replaced the tip on GitHub: made here, then dropped, so no ref here reaches it.
+        await git(worktree, "reset", "-q", "--hard", `${tip}~1`);
+        await editLine(worktree, file, CHANGED, `${branch}, rewritten`);
+        const rewritten = await head(worktree);
+        await git(worktree, "reset", "-q", "--hard", tip);
+        const number = await mergePullRequest(file, {
+          headRefName: branch,
+          head: rewritten,
+          commits: [rewritten],
+          forcePushed: [tip],
+        });
+        return { ...built(branch, worktree, unprovable(1)), ...onGitHub([number], "Review") };
+      },
+      async prUnmerged(branch, { state }) {
+        movesMain("prUnmerged");
+        const github = toGitHub("prUnmerged");
+        const { worktree, tip } = await pullRequestBranch(branch);
+        const number = ++pullRequests;
+        await gh.addPullRequest(github.owner, github.name, {
+          number,
+          state,
+          mergedAt: null,
+          base: "main",
+          headRefName: branch,
+          headRefOid: tip,
+          commits: await described([tip]),
+        });
+        return {
+          ...built(branch, worktree, {
+            verdict: "Review",
+            status: "unmerged commits",
+            reason: "1 commit isn't in main.",
+          }),
+          ...onGitHub([number], "Review"),
+        };
+      },
+      async prStacked(branch, { base = `${branch}-base` } = {}) {
+        movesMain("prStacked");
+        const github = toGitHub("prStacked");
+        const file = await pullRequestFile(branch);
+        const worktree = await add(branch);
+        // `base`'s own commit, under this branch's; `base` has no local branch.
+        await editLine(worktree, file, 2, base);
+        const lower = await head(worktree);
+        await editLine(worktree, file, CHANGED, branch);
+        const tip = await head(worktree);
+        await git(worktree, "push", "-q", "-u", "origin", branch);
+        // The first pull request merges this branch into `base` on GitHub with a merge commit, so `base` holds the tip.
+        const first = ++pullRequests;
+        const intoBase = await git(
+          path,
+          "commit-tree",
+          `${tip}^{tree}`,
+          "-p",
+          lower,
+          "-p",
+          tip,
+          "-m",
+          `Merge ${branch} (#${first})`,
+        );
+        await git(path, "push", "-q", "origin", `${intoBase}:refs/heads/${base}`);
+        await gh.addPullRequest(github.owner, github.name, {
+          number: first,
+          mergedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+          base,
+          headRefName: branch,
+          headRefOid: tip,
+          commits: await described([tip]),
+        });
+        const second = await mergePullRequest(file, {
+          headRefName: base,
+          head: intoBase,
+          commits: [lower, tip, intoBase],
+        });
+        await git(path, "push", "-q", "origin", "--delete", branch);
+        await git(path, "fetch", "-q", "--prune", "origin");
+        return {
+          ...built(branch, worktree, unprovable(2)),
+          ...onGitHub([first, second], "Safe"),
+        };
+      },
     };
   }
 
   async function services(
-    options: { runner?: CommandRunner; sources?: RepoSource[]; savedRepos?: SavedRepos } = {},
+    options: {
+      runner?: CommandRunner;
+      sources?: RepoSource[];
+      savedRepos?: SavedRepos;
+      github?: GitHubOptions;
+      followUp?: FollowUp;
+    } = {},
   ): Promise<Services> {
     const app = await createServices({
       home,
@@ -607,6 +1016,8 @@ export async function createSandbox(
       runner: options.runner ?? runner,
       readCreated,
       savedRepos: options.savedRepos,
+      github: options.github,
+      followUp: options.followUp,
     });
     const service: Services = {
       ...app,
@@ -658,6 +1069,7 @@ export async function createSandbox(
     home,
     scanRoot,
     env,
+    gh,
     wtPath,
     cacheDir,
     backdatesOnDisk,

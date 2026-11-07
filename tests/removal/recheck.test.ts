@@ -6,12 +6,16 @@ import fixture from "../fixtures/list-v2.json";
 import { parseWorktrunk } from "../../src/core/worktrunk/list";
 import {
   aged,
+  aheadPayload,
+  aheadRow,
   branchOnly,
   branchRemoved,
   branchRow,
   commandResult,
+  detachedRow,
   fakeRepos,
   noNewCommits,
+  proven,
   removed,
   repo,
   threeWorktrees,
@@ -453,4 +457,54 @@ test("a branch named like a worktree's folder is not removed, since Worktrunk wo
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("a worktree proven merged on GitHub whose HEAD moves after the repo's removals start is skipped, not force-deleted", async () => {
+  const payload = aheadPayload();
+  const row = aheadRow(proven("bbb"));
+  const { calls, runner } = fakeRepos({
+    payloads: { [repo]: payload },
+    onRemove: (target) => {
+      if (target === detachedRow.path) payload.items[1].head.sha = "moved";
+    },
+  });
+  const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null" });
+  const plan = await actions.prepareRemoval([detachedRow, row]);
+  expect(plan.entries[1]?.branchProof).toEqual({ pr: 60 });
+  const result = await actions.executeRemoval(plan, {
+    [detachedRow.id]: { include: true },
+    [row.id]: { include: true },
+  });
+  expect(result.items[1]).toEqual({
+    id: row.id,
+    status: "skipped",
+    error: "it changed; refresh and preview again",
+  });
+  expect(removed(calls)).toEqual([detachedRow.path!]);
+});
+
+test("a branch proven merged on GitHub that moves after the repo's removals start is skipped, not force-deleted", async () => {
+  const payload = withBranch("ahead");
+  const row = { ...branchOnly(payload), forge: proven("old-sha") };
+  const tips: Record<string, string | null> = { "refs/heads/old": "old-sha" };
+  const { calls, runner } = fakeRepos({
+    payloads: { [repo]: payload },
+    tips,
+    onRemove: (target) => {
+      if (target === branchRow.path) tips["refs/heads/old"] = "newer";
+    },
+  });
+  const actions = createActionService({ wtPath: "/wt", runner, logPath: "/dev/null", ...aged });
+  const plan = await actions.prepareRemoval([branchRow, row]);
+  expect(plan.entries[1]?.branchProof).toEqual({ pr: 60 });
+  const result = await actions.executeRemoval(plan, {
+    [branchRow.id]: { include: true },
+    [row.id]: { include: true },
+  });
+  expect(result.items[1]).toEqual({
+    id: row.id,
+    status: "skipped",
+    error: "it changed; refresh and preview again",
+  });
+  expect(removed(calls)).toEqual([branchRow.path!]);
 });

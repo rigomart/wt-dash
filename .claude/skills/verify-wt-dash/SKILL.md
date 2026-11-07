@@ -21,39 +21,47 @@ Every stack command prints one JSON object, `{"ok":true,...}` or `{"ok":false,"e
 
 An instance is a name (1–24 of `a-z0-9-`; use one per task, such as the branch topic) and everything under `.verify/<name>/` (gitignored):
 
-- `sandbox/`: its own HOME (so its own `~/.cache/wt-dash/sizes.json` and `removals.log`), Git config, Worktrunk config (`WORKTRUNK_CONFIG_PATH` and friends), the scan root `sandbox/projects/` with the seeded repos, and their worktrees in `sandbox/worktrees/`.
-- A tmux server on its own socket, `tmux -L wt-dash-verify-<name>-<checkout hash>`, holding one session, `app`, running `bun src/index.ts sandbox/projects` from this checkout with the instance env. The hash keeps the same name in two checkouts apart; `env` prints the exact socket.
+- `sandbox/`: its own HOME (so its own `~/.cache/wt-dash/sizes.json` and `removals.log`), Git config, Worktrunk config (`WORKTRUNK_CONFIG_PATH` and friends), the scan root `sandbox/projects/` with the seeded repos, and their worktrees in `sandbox/worktrees/`. Its PATH has no real `gh`: `gh` is the fake from `tests/support/gh.ts`, answering from `sandbox/gh/state.json` and logging to `sandbox/gh/calls.jsonl`, so after the `eval` of `env` → `exports`, run your own `gh` in another shell call.
+- A tmux server on its own socket, `tmux -L wt-dash-verify-<name>-<checkout hash>`, holding one session, `app`, running `bun src/index.ts sandbox/projects` from this checkout with the instance env, plus any `up --app-args` (below). The hash keeps the same name in two checkouts apart; `env` prints the exact socket.
 - `logs/` (`app.log` is the app's stderr, `stack.log` every up/down) and `evidence/`.
 
 There are no ports. Two agents in one checkout only need different names. Never drive the developer's own wt-dash, `~/projects` or `~/.cache/wt-dash`, and never drive an instance you did not start: `list` shows what exists. `up` refuses an instance started on another branch; recreate it with `down --purge` then `up`.
 
 ## Users and test data
 
-There are no users. The data is the seed, built by `tests/support/fixture.ts` with real Git and Worktrunk: four repos under the scan root, one of which (`tools`) has no worktrees. `env --full` → `seed` lists every row with the verdict, status and reason the fixture expects; read it compactly with `bun .claude/skills/verify-wt-dash/stack.ts env --name <task> --full | jq -c '.seed[] | [.repo, .branch, .verdict, .status, .reason]'`. On macOS:
+There are no users. The data is the seed, built by `tests/support/fixture.ts` with real Git and Worktrunk: five repos under the scan root, one of which (`tools`) has no worktrees, and one (`worker`) on GitHub through the fake `gh`. `env --full` → `seed` lists every row with the verdict, status and reason the fixture expects; read it compactly with `bun .claude/skills/verify-wt-dash/stack.ts env --name <task> --full | jq -c '.seed[] | [.repo, .branch, .verdict, .status, .reason]'`. On macOS:
 
-| Repo | Row (kind)                 | Verdict         | Status               | Notes                              |
-| ---- | -------------------------- | --------------- | -------------------- | ---------------------------------- |
-| api  | feature/assets             | Safe            | merged               | 12.0 MB of ignored files           |
-| api  | feature/login              | Safe            | merged               | 3 days old                         |
-| api  | agent/old-session          | Safe            | merged               | 💬 mark 3 days old, "likely stale" |
-| api  | leftover/hotfix (branch)   | Safe            | merged               | no worktree                        |
-| api  | agent/refactor             | Review          | merged               | 🤖 mark set at seed time           |
-| api  | feature/new-endpoint       | Review          | no new commits       | created at seed time; AGE `3d`     |
-| api  | feature/dirty-form         | Review          | uncommitted changes  |                                    |
-| api  | feature/locked             | Review, blocked | locked               | reason "agent session"             |
-| api  | leftover/spike (branch)    | Review          | unmerged commits     | no worktree                        |
-| web  | fix/header, feature/bundle | Safe            | merged               | bundle is 4.0 MB                   |
-| web  | feature/search             | Review          | unmerged commits     | 2 commits                          |
-| web  | feature/cache              | Review          | unpushed commits     | local bare `origin`                |
-| web  | feature/rebase             | Busy, blocked   | rebase in progress   |                                    |
-| web  | feature/gone               | Broken          | folder missing       |                                    |
-| docs | docs/typos                 | Safe            | merged               | 3 days old                         |
-| docs | docs/conflict              | Busy, blocked   | unresolved conflicts |                                    |
-| docs | docs/locked-bare           | Review, blocked | locked               | no reason                          |
+| Repo   | Row (kind)                                                          | Verdict         | Status               | Notes                                      |
+| ------ | ------------------------------------------------------------------- | --------------- | -------------------- | ------------------------------------------ |
+| api    | feature/assets                                                      | Safe            | merged               | 12.0 MB of ignored files                   |
+| api    | feature/login                                                       | Safe            | merged               | 3 days old                                 |
+| api    | agent/old-session                                                   | Safe            | merged               | 💬 mark 3 days old, "likely stale"         |
+| api    | leftover/hotfix (branch)                                            | Safe            | merged               | no worktree                                |
+| api    | agent/refactor                                                      | Review          | merged               | 🤖 mark set at seed time                   |
+| api    | feature/new-endpoint                                                | Review          | no new commits       | created at seed time; AGE `3d`             |
+| api    | feature/dirty-form                                                  | Review          | uncommitted changes  |                                            |
+| api    | feature/locked                                                      | Review, blocked | locked               | reason "agent session"                     |
+| api    | leftover/spike (branch)                                             | Review          | unmerged commits     | no worktree                                |
+| web    | fix/header, feature/bundle                                          | Safe            | merged               | bundle is 4.0 MB                           |
+| web    | feature/search                                                      | Review          | unmerged commits     | 2 commits                                  |
+| web    | feature/cache                                                       | Review          | unpushed commits     | local bare `origin`                        |
+| web    | feature/rebase                                                      | Busy, blocked   | rebase in progress   |                                            |
+| web    | feature/gone                                                        | Broken          | folder missing       |                                            |
+| docs   | docs/typos                                                          | Safe            | merged               | 3 days old                                 |
+| docs   | docs/conflict                                                       | Busy, blocked   | unresolved conflicts |                                            |
+| docs   | docs/locked-bare                                                    | Review, blocked | locked               | no reason                                  |
+| worker | feature/squashed, feature/revised, feature/rebased, feature/stacked | Safe            | merged on GitHub     | squash-merged; Review until GitHub answers |
+| worker | leftover/squashed (branch)                                          | Safe            | merged on GitHub     | no worktree, 3 days old                    |
+| worker | feature/after-merge                                                 | Review          | unmerged commits     | a commit made after its PR merged          |
+| worker | feature/no-pr                                                       | Review          | unmerged commits     | pushed, in no pull request                 |
+
+`worker` is the only repository on github.com, and the app starts online, so its first scan asks the fake GitHub; `seed` holds each `worker` row as it reads once GitHub has answered, and `github.gitOnly` as it reads before or without an answer. [features/pull-requests.md](features/pull-requests.md) has the details. `stack.ts gh --name <task> [--mode <mode>] [--delay <ms>]` changes how the fake answers from its next call and prints its call count; `up --gh-mode`/`--gh-delay` do the same before the app starts, which is the only way to see the first scan's check, since proofs are cached.
 
 The list's AGE column (`now`, `3d`) is the age of the row's last commit, not of the worktree; verdict reasons such as "Created just now" use when the worktree was created. So `feature/new-endpoint`, made at seed time on top of a main commit dated 3 days back, reads `3d` beside `Created just now, so it may s…`: expected, and `i` shows the same split (`LAST COMMIT   3d ago`). The worktrees made by the fixture's squash-merge builders read `now` because their own commits are new.
 
 `up --seed <file>` builds the sandbox with a module's default export instead (a `SeedModule` from `stack.ts`); `scripts/readme-images/seed.ts`, the README's made-up projects, is one. Its rows differ from this table, and `state` lists only repos under its scan root.
+
+`up --app-args='<args>'` puts extra arguments on the app's command line after the scan root, so a flag such as `--depth 0` or `--offline` can be driven in the real app: `up --name <task> --app-args='--depth 0'`. The arguments are split on spaces, so one cannot contain a space, and a value that starts with `--` needs the `=`. The instance keeps them: a stopped instance restarts with them, `up` on a running one with other arguments is refused (`down --name <task>`, then `up` again), and `down --purge` forgets them. Without the option the command is unchanged. If the app exits on its arguments (`--version`, an invalid flag), `up` fails with the pane's text in `screen`.
 
 Assume nothing beyond this table, and only what `state` shows after you change things. Removals are real, so a check that removes rows starts from a fresh seed: `down --purge`, then `up` (half a second). To arrange other state, use Git or `wt` as the instance's user, through a supported path, in the same shell call as the `eval` of `env` → `exports` (it reads `env --full`), as [features/rescan.md](features/rescan.md) does. Never edit `.git` files or the cache to fake the behavior under test.
 
@@ -97,7 +105,7 @@ It defines `t` (tmux on the instance socket), `screen` (plain text of the pane),
 - **One key, then wait for its effect, then read.** A capture right after `send-keys` can still show the previous frame. Wait for text that only the new state has: the screen title on line 1 (`wt-dash › web`), a dialog title, a toast. Before waiting for something to go, confirm it was there.
 - **Locate by text and line.** Line 1 is the header (screen title, counts, `scanned HH:MM`); line 2 the tabs and search in a list; the second-last line the status (toasts, removal progress); the last line the key hints. The focused row starts with `▌`, a selected row has `■`, an unselectable one `–`. In the wide layout everything right of the sidebar's `│` is the list: `screen | sed 's/^.*│ //'` reads it alone.
 - **Exact values.** Compare whole lines or exact substrings (`grep -F`), never "something changed". Colors: `t capture-pane -p -e -t app` keeps the escapes (Safe `38;5;2`, Review `38;5;3`, Busy `38;5;4`, Broken `38;5;1`).
-- **Git state** after an action: `bun .claude/skills/verify-wt-dash/stack.ts state --name <task>` prints `{"ok":true,"name":…,"repos":{"<repo>":{"worktrees":[{"path","branch","head","locked"?,"prunable"?,"exists"}],"branches":["…"]}},"removalsLog":[{"timestamp","repo","branch","path","flags","exitCode","branchOutcome","error",…}]}`. `repos` is an object keyed by repo name (`api`, `web`, `docs`, `tools`), not an array; the main checkout is the first worktree; `branch` is null for a detached HEAD (`feature/rebase` mid-rebase); `removalsLog` is the last 20 lines of the instance's `removals.log`, oldest first (`--log <n>` for more). For example `state --name <task> | jq -c '.repos.api.branches, [.repos.web.worktrees[].branch], .removalsLog[-1]'`.
+- **Git state** after an action: `bun .claude/skills/verify-wt-dash/stack.ts state --name <task>` prints `{"ok":true,"name":…,"repos":{"<repo>":{"worktrees":[{"path","branch","head","locked"?,"prunable"?,"exists"}],"branches":["…"]}},"removalsLog":[{"timestamp","repo","branch","path","flags","exitCode","branchOutcome","error",…}]}`. `repos` is an object keyed by repo name (`api`, `web`, `docs`, `tools`, `worker`), not an array; the main checkout is the first worktree; `branch` is null for a detached HEAD (`feature/rebase` mid-rebase); `removalsLog` is the last 20 lines of the instance's `removals.log`, oldest first (`--log <n>` for more). For example `state --name <task> | jq -c '.repos.api.branches, [.repos.web.worktrees[].branch], .removalsLog[-1]'`.
 - **Watch it yourself** (optional, read-only): `t attach -r -t app` from a real terminal.
 
 Worked example, [leftover-branches.md](features/leftover-branches.md) checks 3 and 4, as run:
@@ -148,7 +156,7 @@ It saves the pane with colors (`evidence/<out>.ansi`), renders rows and columns 
 - **Escape followed closely by a key is Alt+key.** `t send-keys -t app Escape 3` (or two quick calls) reaches the app as Alt+3: the Escape is lost. Send Escape alone, wait for its effect, then the next key.
 - **The remove dialog ignores Enter for 400 ms after it opens** (`y` is never ignored). `send-keys Enter Enter` opens it and leaves it open; wait for the dialog before confirming with Enter.
 - **Toasts last 2.5–10 s** (most 4 s; removal summaries 10 s; "Can't select" 6 s) on the status line. Read them right after the key, and do not mistake an earlier toast for a new one.
-- **Spinners and progress** (`⠼ scanning 0/4 repos`, `Removing 1 of 1: …`) change every 120 ms and a local scan or removal ends in under a second; poll every 50 ms right after the key to catch them, and never compare whole screens while one is up.
+- **Spinners and progress** (`⠼ scanning 0/5 repos`, `Removing 1 of 1: …`) change every 120 ms and a local scan or removal ends in under a second; poll every 50 ms right after the key to catch them, and never compare whole screens while one is up.
 - **A removal in `web` drops the Broken `feature/gone` record** (it becomes a branch row; seen twice). Prove anything about Broken rows before removing in `web`, or on a fresh seed.
 - **`sizing` is gone within a second of `scanned`** on the seed. To see it, add a worktree with a large folder (a few hundred thousand files) as the instance's user and press `r`: `1 sizing` shows while `du` runs. A worktree whose saved size went stale keeps its old size while re-measured, so it never reads `sizing`. A worktree whose `du` fails (an unreadable subfolder, a missing folder) stops reading `sizing` once it fails.
 - **Selections and screen survive a resize.** `resize-window` keeps the selection, the open project and the focus (a row selected wide is still `■ 1 selected` narrow, and back). Clear the selection (Esc) before switching variants, or the next variant's checks start with it.
@@ -156,6 +164,7 @@ It saves the pane with colors (`evidence/<out>.ansi`), renders rows and columns 
 - **Truncation.** The list cuts reasons and long branch names with `…` (`feature/n…-endpoint` at 80 columns) and drops the reason's final period; the sidebar and strip cut paths in the middle. Read full values from `i` or `state`.
 - **The wide sidebar never mentions `tools`** (no worktrees); only the narrow table says `1 project with no worktrees`.
 - **zsh does not split a variable into words**: `T="tmux -L x"; $T ls` fails with "command not found". Use the preamble's `t` function.
+- **A checkout under `.claude/worktrees`** (an agent's worktree) puts the sandbox there too, so every seeded worktree reads `Claude Code` where the feature files say `other` (`Claude Code 22 · no worktree 3`). The counts still match.
 - **Paths are real paths.** The sandbox lives in the checkout, so paths are what `env` prints. A worktree added under a macOS temp folder (`/var/folders/...`) shows in the app and in `state` as `/private/var/folders/...`. Add worktrees under `env` → `paths.worktrees`: `down --purge` deletes only the sandbox, so one outside it stays behind until you `git worktree remove` it.
 - **Do not run `wt config show`** to inspect the instance's Worktrunk settings: per the developer it runs the claude CLI (its `--full` runs commit-generation checks). Read `$HOME/.config/worktrunk/config.toml` from `env` → `paths.home`.
 - **tmux 3.6a's server exits at start** ("server exited unexpectedly") when `set -g window-size manual` is in the config file; the stack sets it after creating the session. To watch, attach read-only (`t attach -r -t app`), so no stray key reaches the app.

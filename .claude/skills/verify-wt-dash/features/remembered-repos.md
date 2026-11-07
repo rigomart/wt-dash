@@ -16,11 +16,11 @@ Every repository a run finds, from any source (the default scan folders, the age
 
 ## Checks
 
-1. After `up`, `$XDG_STATE_HOME/wt-dash/repos.json` is `{"repos": [...]}` listing the scan root's `api`, `docs`, `tools` and `web`, sorted, as real paths. The app shows only the scan root's projects, as before.
-2. A run without folders: wide, the sidebar lists `All projects 16`, `▌ api 7`, `web 6`, `docs 3`; narrow, the table lists the same rows and `1 project with no worktrees`.
-3. `--doctor` without folders prints `Scan folders: none of ~/projects, ~/code, ~/dev, ~/src, ~/work exists`, `Agent worktree folders: none of the known ones exists`, then `Saved repositories:` / `  <home>/.local/state/wt-dash/repos.json  4 repositories` / `Repositories found: 4`, and exits 0. `--doctor <scan root>` prints no `Saved repositories` section and `Repositories found: 4` from the folder alone.
-4. `bun src/index.ts $HOME/elsewhere` opens on `lib` alone (`wt-dash › lib`, `□ feature/lib`); the file now holds five repos. A run without folders then lists `lib 1` under `docs 3`, with `All projects 17`.
-5. Move `$HOME/elsewhere/lib` away and delete the `.git` folder of the scan root's `tools`, then press `r` in a run without folders: `lib` is gone, `All projects 16`, and the file holds only `api`, `docs` and `web`.
+1. After `up`, `$XDG_STATE_HOME/wt-dash/repos.json` is `{"repos": [...]}` listing the scan root's `api`, `docs`, `tools`, `web` and `worker`, sorted, as real paths. The app shows only the scan root's projects, as before.
+2. A run without folders: wide, the sidebar lists `All projects 22`, `▌ api 7`, `web 6`, `worker 6`, `docs 3`; narrow, the table lists the same rows and `1 project with no worktrees`.
+3. `--doctor` without folders prints `Scan folders: none of ~/projects, ~/code, ~/dev, ~/src, ~/work exists`, `Agent worktree folders: none of the known ones exists`, then `Saved repositories:` / `  <home>/.local/state/wt-dash/repos.json  5 repositories` / `Repositories found: 5`, and exits 0. `--doctor <scan root>` prints no `Saved repositories` section and `Repositories found: 5` from the folder alone.
+4. `bun src/index.ts $HOME/elsewhere` opens on `lib` alone (`wt-dash › lib`, `□ feature/lib`); the file now holds six repos. A run without folders then lists `lib 1` under `docs 3`, with `All projects 23`.
+5. Move `$HOME/elsewhere/lib` away and delete the `.git` folder of the scan root's `tools`, then press `r` in a run without folders: `lib` is gone, `All projects 22`, and the file holds only `api`, `docs`, `web` and `worker`.
 6. Write `{oops` to the file and start a run with the folder `<scan root>/web`: it opens `wt-dash › web` with no error, and the file holds only `web`, as valid JSON. `chmod 000` the file and start the same run: the same result, with the file readable again. No `repos.json.tmp-*` file is left in its folder.
 7. A run without folders in `home3`: the projects read `No worktrees found, and no folder to scan exists.`, `Scan other folders with: wt-dash <folder>`, `wt-dash remembers the repositories it finds, and lists them in every run without folders.` (wrapped after `every run` in narrow) and `To forget them, delete ~/.local/state/wt-dash/repos.json`. `home3` has no `.local/state/wt-dash` folder afterwards: a run that finds nothing creates no file.
 

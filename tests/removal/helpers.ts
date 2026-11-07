@@ -1,6 +1,7 @@
 import fixture from "../fixtures/list-v2.json";
+import { assessRow } from "../../src/core/assess";
 import { parseWorktrunk } from "../../src/core/worktrunk/list";
-import type { CommandRunner } from "../../src/core/types";
+import type { CommandRunner, ForgeCheck, WorktreeRow } from "../../src/core/types";
 
 export const repo = "/Users/test/projects/sample";
 export const rows = parseWorktrunk(repo, JSON.stringify(fixture));
@@ -160,3 +161,25 @@ export const branchRemoved = (outcome = "deleted") =>
       pruned: false,
     },
   ]);
+
+/** GitHub's answer that PR `pr` merged `tip` into main, as a follow-up attaches it to a row. */
+export const proven = (tip: string, pr = 60): ForgeCheck => ({
+  kind: "proven",
+  tip,
+  pr,
+  mergedAt: "2026-10-30T12:00:00Z",
+  base: "main",
+  by: "commit",
+});
+
+/** The fixture with feature/name one commit ahead of main, which Worktrunk can't show merged. */
+export function aheadPayload(): any {
+  const payload: any = structuredClone(fixture);
+  payload.items[1].default_branch = { ahead: 1, behind: 0 };
+  payload.items[1].display = { state: "ahead" };
+  return payload;
+}
+
+/** feature/name from `aheadPayload`, with `forge` attached and the row settled as the scan does. */
+export const aheadRow = (forge?: ForgeCheck): WorktreeRow =>
+  assessRow({ ...parseWorktrunk(repo, JSON.stringify(aheadPayload()))[0]!, forge });

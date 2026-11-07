@@ -6,6 +6,12 @@ import { createServices } from "./app";
 import { runCommand } from "./core/process";
 import { savedReposFile } from "./core/scan/saved";
 
+function githubLine(offline: boolean, ghPath: string | null): string {
+  if (offline) return "GitHub: off (--offline)";
+  if (!ghPath) return "GitHub: gh not found; rows Git can't prove merged stay Review";
+  return `GitHub: checks merged pull requests with gh at ${ghPath}`;
+}
+
 async function main(): Promise<void> {
   const home = homedir();
   const options = parseArgs(process.argv.slice(2), home, process.cwd());
@@ -21,7 +27,7 @@ async function main(): Promise<void> {
   const savedFile = savedReposFile(home);
   if (options.mode === "doctor") {
     console.log(
-      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\n${await doctorSources(ready.sources, options, savedFile)}\nSearch depth: ${options.depth}\nSetup checks passed.`,
+      `wt-dash ${version}\nPlatform: ${platformName()} ${process.arch}\nGit: ${ready.gitVersion}\nWorktrunk: ${ready.wtVersion} (${ready.wtPath})\n${githubLine(options.offline, ready.ghPath)}\n${await doctorSources(ready.sources, options, savedFile)}\nSearch depth: ${options.depth}\nSetup checks passed.`,
     );
     return;
   }
@@ -37,6 +43,7 @@ async function main(): Promise<void> {
     wtPath: ready.wtPath,
     runner: runCommand,
     savedRepos: { file: savedFile, listed: options.defaults },
+    github: { offline: options.offline, ghPath: ready.ghPath },
   });
   try {
     await runTerminal(dashboard, {

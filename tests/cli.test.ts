@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseArgs } from "../src/cli";
+import { help, parseArgs } from "../src/cli";
 
 test("uses the default folders when none are given and resolves supplied folders independently", () => {
   expect(parseArgs([], "/Users/test", "/Users/test/code")).toMatchObject({
@@ -37,6 +37,17 @@ test("rejects unknown options, missing values, and invalid scan depths", () => {
   expect(parseArgs(["--depth", "0", "--", "-folder"], "/Users/test", "/repo").roots).toEqual([
     "/repo/-folder",
   ]);
+});
+
+test("--offline is parsed, off by default, and listed in the help", () => {
+  expect(parseArgs([], "/home", "/repo").offline).toBe(false);
+  expect(parseArgs(["--offline", "."], "/home", "/repo")).toMatchObject({
+    offline: true,
+    mode: "run",
+    roots: ["/repo"],
+  });
+  expect(parseArgs(["--", "--offline"], "/home", "/repo").roots).toEqual(["/repo/--offline"]);
+  expect(help).toContain("--offline          Don't ask GitHub about merged pull requests");
 });
 
 test("help, version and doctor have explicit modes", () => {

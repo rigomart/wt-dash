@@ -18,6 +18,11 @@ export interface RemovalEntry extends FileReport {
   blockedReason: string | null;
   requiresDiscard: boolean;
   branchWillBeRetained: boolean;
+  /**
+   * Set when Worktrunk can't prove the branch merged but GitHub can: PR `pr` merged its tip. Removal then
+   * force-deletes the branch for this row alone.
+   */
+  branchProof?: { pr: number };
   /** Device and inode of an orphan folder at the preview; removal skips it if the folder at the path differs. */
   folderId?: string;
 }

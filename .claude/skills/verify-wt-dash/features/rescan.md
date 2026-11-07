@@ -14,8 +14,8 @@
 ## Checks
 
 1. Before `r`, `docs` reads `docs 3` and no row named `feature/external` exists.
-2. Right after `r`, line 1 shows a spinner, initially `scanning 0/0 repos` until discovery finishes, then `scanning 0/4 repos` (the 4 seeded repos, `tools` included).
-3. When line 1 reads `scanned HH:MM` again, the sidebar reads `docs 4` and `All projects 17`, and in `docs` the row `feature/external` is in REVIEW with `no new commits  Created just now, so it may s…`.
+2. Right after `r`, line 1 shows a spinner, initially `scanning 0/0 repos` until discovery finishes, then `scanning 0/5 repos` (the 5 seeded repos, `tools` included).
+3. When line 1 reads `scanned HH:MM` again, the sidebar reads `docs 4` and `All projects 23`, and in `docs` the row `feature/external` is in REVIEW with `no new commits  Created just now, so it may s…`.
 4. Once sizes settle, another `r` keeps the saved sizes. Paths still being measured remain marked as sizing until their own pending measurements finish; failed measurements stop being marked even when their size is unknown. Fresh-cache checks can share one snapshot update across a short display frame.
 5. On `api › feature/assets`, add a 2 MiB file at the worktree root outside the app, then `r`. Its displayed size grows from `12.0 MB` to `14.0 MB` once sizing finishes. A root-level untracked file also moves this row to REVIEW; find and focus it again before the next check.
 6. Add a 2 MiB file under the existing `node_modules/pkg/` folder. `r` keeps the cached size while the worktree root and `node_modules` timestamps are unchanged and the measurement is under 24 hours old. `R` on the focused worktree always measures again: the toast reads `Measuring feature/assets…`, then the row reads `16.0 MB`. Repeat in the other layout, adding another 2 MiB: `R` then shows `18.0 MB`.

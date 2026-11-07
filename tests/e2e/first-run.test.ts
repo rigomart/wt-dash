@@ -4,7 +4,7 @@ import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "../../src/cli";
 import { prepareStartup } from "../../src/startup";
 import { inSandbox, withApp, TEST_TIMEOUT } from "../support/app";
-import type { Sandbox } from "../support/fixture";
+import { createSandbox, type Sandbox } from "../support/fixture";
 import { savedReposFile } from "../../src/core/scan/saved";
 
 async function repoWithWorktree(sandbox: Sandbox, path: string, branch: string, worktree: string) {
@@ -121,6 +121,51 @@ test(
         ].join("\n"),
       );
     }),
+  TEST_TIMEOUT,
+);
+
+async function doctor(sandbox: Sandbox, ...args: string[]) {
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, "../../src/index.ts"), "--doctor", ...args],
+    { cwd: sandbox.home, env: sandbox.env, stdout: "pipe", stderr: "pipe" },
+  );
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+  return stdout;
+}
+
+test(
+  "--doctor says whether pull requests are checked with gh, and never runs it",
+  () =>
+    inSandbox(async (sandbox) => {
+      await arrangeFirstRun(sandbox);
+      expect(await doctor(sandbox)).toContain(
+        `GitHub: checks merged pull requests with gh at ${join(sandbox.gh.bin, "gh")}\n`,
+      );
+      expect(await doctor(sandbox, "--offline")).toContain("GitHub: off (--offline)\n");
+      expect(await sandbox.gh.calls()).toEqual([]);
+    }),
+  TEST_TIMEOUT,
+);
+
+test(
+  "--doctor says when gh is not found and what that costs",
+  async () => {
+    const sandbox = await createSandbox({ gh: "missing" });
+    try {
+      await arrangeFirstRun(sandbox);
+      expect(await doctor(sandbox)).toContain(
+        "GitHub: gh not found; rows Git can't prove merged stay Review\n",
+      );
+      expect(await doctor(sandbox, "--offline")).toContain("GitHub: off (--offline)\n");
+    } finally {
+      await sandbox.cleanup();
+    }
+  },
   TEST_TIMEOUT,
 );
 

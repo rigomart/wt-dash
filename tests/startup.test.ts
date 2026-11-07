@@ -35,6 +35,19 @@ test("finds dependencies on PATH and deduplicates resolved scan folders", async 
   expect(ready.gitVersion).toContain("2.50.0");
 });
 
+test("finds gh on PATH without running it, and a missing gh is not an error", async () => {
+  const { root, bin } = await environment();
+  const options = parseArgs([root], root, root);
+  expect((await prepareStartup(options, { platform: "darwin", path: bin })).ghPath).toBeNull();
+  // A gh that leaves a mark if it runs, as `gh auth status` would contact GitHub.
+  const marker = join(root, "gh-ran");
+  await writeFile(join(bin, "gh"), `#!/bin/sh\ntouch '${marker}'\n`);
+  await chmod(join(bin, "gh"), 0o755);
+  const ready = await prepareStartup(options, { platform: "darwin", path: bin });
+  expect(ready.ghPath).toBe(join(bin, "gh"));
+  expect(await Bun.file(marker).exists()).toBe(false);
+});
+
 test("honors an explicit executable instead of a different Worktrunk on PATH", async () => {
   const { root, bin } = await environment();
   const path = join(root, "custom-wt");

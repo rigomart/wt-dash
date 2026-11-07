@@ -171,7 +171,8 @@ export async function removeBatch(
       }
       const flags = [
         choice.discardChanges && entry.requiresDiscard ? "-f" : null,
-        choice.forceDeleteBranch ? "-D" : null,
+        // Worktrunk keeps a branch its own checks can't show merged, so a merged pull request needs -D.
+        choice.forceDeleteBranch || entry.branchProof ? "-D" : null,
         choice.reapProcesses && row.kind === "worktree" ? "--reap" : null,
       ].filter((flag): flag is string => flag !== null);
       const label = row.path ?? `branch ${row.branch}`;
@@ -215,6 +216,7 @@ export async function removeBatch(
         exitCode,
         branchOutcome: branchOutcome ?? null,
         ...(pruned === undefined ? {} : { pruned }),
+        ...(entry.branchProof ? { branchProof: entry.branchProof } : {}),
         error: error ?? null,
       });
     }
