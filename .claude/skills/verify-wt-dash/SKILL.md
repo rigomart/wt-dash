@@ -21,7 +21,7 @@ Every stack command prints one JSON object, `{"ok":true,...}` or `{"ok":false,"e
 
 An instance is a name (1–24 of `a-z0-9-`; use one per task, such as the branch topic) and everything under `.verify/<name>/` (gitignored):
 
-- `sandbox/`: its own HOME (so its own `~/.cache/wt-dash/sizes.json` and `removals.log`), Git config, Worktrunk config (`WORKTRUNK_CONFIG_PATH` and friends), the scan root `sandbox/projects/` with the seeded repos, and their worktrees in `sandbox/worktrees/`.
+- `sandbox/`: its own HOME (so its own `~/.cache/wt-dash/sizes.json` and `removals.log`), Git config, Worktrunk config (`WORKTRUNK_CONFIG_PATH` and friends), the scan root `sandbox/projects/` with the seeded repos, and their worktrees in `sandbox/worktrees/`. Its PATH has no real `gh`: `gh` is the fake from `tests/support/gh.ts`, answering from `sandbox/gh/state.json` and logging to `sandbox/gh/calls.jsonl`, so after the `eval` of `env` → `exports`, run your own `gh` in another shell call.
 - A tmux server on its own socket, `tmux -L wt-dash-verify-<name>-<checkout hash>`, holding one session, `app`, running `bun src/index.ts sandbox/projects` from this checkout with the instance env. The hash keeps the same name in two checkouts apart; `env` prints the exact socket.
 - `logs/` (`app.log` is the app's stderr, `stack.log` every up/down) and `evidence/`.
 
