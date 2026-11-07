@@ -226,6 +226,7 @@ export function projectsReady(state: UiState, snapshot: DashboardSnapshot): bool
 export function spinning(state: UiState, snapshot: DashboardSnapshot): boolean {
   return (
     snapshot.progress.phase === "scanning" ||
+    snapshot.checking > 0 ||
     state.pending !== null ||
     state.jobs.length > 0 ||
     state.pruning

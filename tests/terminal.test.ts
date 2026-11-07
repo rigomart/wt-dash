@@ -100,6 +100,7 @@ function fakeService(
     errors: {},
     fatalError: null,
     sizing: [],
+    checking: 0,
     processes: {},
   };
   let refreshes = 0;

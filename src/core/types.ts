@@ -164,6 +164,8 @@ export interface DashboardSnapshot {
   fatalError: string | null;
   /** Worktree folders whose size is being measured right now. */
   sizing: string[];
+  /** Follow-ups started after a repository's listing that haven't finished yet. */
+  checking: number;
   /** Processes running inside each row's folder, keyed by the folder, as of the last completed scan. */
   processes: Record<string, RunningProcess[]>;
 }
