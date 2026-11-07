@@ -6,7 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
   createSandbox,
@@ -15,6 +15,7 @@ import {
   type Repo,
   type Sandbox,
 } from "../../../tests/support/fixture";
+import { GH_LOG_ENV, GH_STATE_ENV, type GhMode, type GhState } from "../../../tests/support/gh";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 const verifyRoot = join(repoRoot, ".verify");
@@ -45,6 +46,12 @@ export interface SeedRow {
   blocked: boolean;
   note?: string;
   minSizeKiB?: number;
+  /**
+   * For a row only GitHub can settle: the pull requests the fake GitHub holds for it, and the row as Git alone
+   * judges it, shown before GitHub answers and with a "Not checked against GitHub" note when it can't be asked.
+   * `verdict`, `status` and `reason` above are the row once the fake GitHub has answered.
+   */
+  github?: { pullRequests: number[]; gitOnly: { verdict: string; status: string; reason: string } };
 }
 
 /**
@@ -294,9 +301,47 @@ async function seed(
   };
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** How the GitHub check answers for each `pr…` builder's row, and the `worker` row no pull request holds. */
+type GitHubAnswer = "commit" | "tree" | "stacked" | "without" | "none";
+
+/** The row once the fake GitHub has answered, worded as the app words it (the merge day in local time). */
+function answered(
+  built: Built,
+  answer: GitHubAnswer,
+): { expected: Built["expected"]; github: NonNullable<SeedRow["github"]> } {
+  const { verdict, status, reason } = built.expected;
+  const prs = built.github?.pullRequests ?? [];
+  const today = new Date();
+  // The fixture merges every pull request at seed time; the last one is the one merged into main.
+  const pr = `PR #${prs.at(-1)} merged ${MONTHS[today.getMonth()]} ${today.getDate()}`;
+  const endings = {
+    commit: " with this exact commit.",
+    tree: " with the same files.",
+    stacked: " and brought in this commit from a stacked pull request.",
+    without: "",
+    none: "",
+  };
+  const expected =
+    answer === "without" || answer === "none"
+      ? {
+          ...built.expected,
+          reason: `${reason} ${answer === "none" ? "No merged pull request on GitHub has this commit." : `${pr} without this commit.`}`,
+        }
+      : {
+          ...built.expected,
+          verdict: built.github!.verdict,
+          status: "merged on GitHub",
+          reason: pr + endings[answer],
+        };
+  return { expected, github: { pullRequests: prs, gitOnly: { verdict, status, reason } } };
+}
+
 async function defaultSeed(sandbox: Sandbox): Promise<SeedRow[]> {
   const inRepo = async (name: string, build: (repo: Repo) => Promise<Built[]>) =>
     build(await sandbox.repo(name));
+  const answers = new Map<Built, GitHubAnswer>();
   const sequence = async (repo: Repo, steps: Array<(repo: Repo) => Promise<Built>>) => {
     const out: Built[] = [];
     for (const step of steps) out.push(await step(repo));
@@ -334,9 +379,39 @@ async function defaultSeed(sandbox: Sandbox): Promise<SeedRow[]> {
       ]),
     ),
     inRepo("tools", async () => []),
+    // Squash-merged on GitHub, so only the fake GitHub can settle these rows. Named to sort after `web`, its tie.
+    (async () => {
+      const repo = await sandbox.repo("worker", { github: true });
+      const steps: Array<[GitHubAnswer, () => Promise<Built>]> = [
+        ["commit", () => repo.prMergedWorktree("feature/squashed")],
+        ["commit", () => repo.prMergedEarlierCommit("feature/revised")],
+        ["tree", () => repo.prTreeMatch("feature/rebased")],
+        ["stacked", () => repo.prStacked("feature/stacked")],
+        ["without", () => repo.prMissingCommit("feature/after-merge")],
+        ["commit", () => repo.prMergedBranch("leftover/squashed")],
+        [
+          "none",
+          // Pushed, and in no pull request at all.
+          async () => {
+            const built = await repo.unmergedWorktree("feature/no-pr");
+            await sandbox.git(built.path!, "push", "-q", "-u", "origin", "feature/no-pr");
+            return built;
+          },
+        ],
+      ];
+      const out: Built[] = [];
+      for (const [answer, step] of steps) {
+        const built = await step();
+        answers.set(built, answer);
+        out.push(built);
+      }
+      return out;
+    })(),
   ]);
   return groups.flat().map((built) => {
-    let expected = built.expected;
+    const answer = answers.get(built);
+    const github = answer ? answered(built, answer) : null;
+    let expected = github?.expected ?? built.expected;
     // Without on-disk backdating (Linux) the real binary sees mergedWorktree's worktree as new.
     if (
       !sandbox.backdatesOnDisk &&
@@ -355,8 +430,71 @@ async function defaultSeed(sandbox: Sandbox): Promise<SeedRow[]> {
       path: built.path,
       ...expected,
       ...(built.minSizeKiB === undefined ? {} : { minSizeKiB: built.minSizeKiB }),
+      ...(github ? { github: github.github } : {}),
     };
   });
+}
+
+const GH_MODES: GhMode[] = ["ok", "signed-out", "bad-credentials", "offline", "missing-repo"];
+
+interface GhChange {
+  mode?: GhMode;
+  delayMs?: number;
+}
+
+/** A mode and a delay for the fake gh, from `--<prefix>mode` and `--<prefix>delay`. */
+function ghChangeFrom(flags: Record<string, string | true>, prefix: string): GhChange {
+  const change: GhChange = {};
+  const mode = flags[`${prefix}mode`];
+  if (mode !== undefined) {
+    if (typeof mode !== "string" || !GH_MODES.includes(mode as GhMode))
+      throw new Failure(`Unknown gh mode: ${String(mode)}`, `Use one of ${GH_MODES.join(", ")}.`);
+    change.mode = mode as GhMode;
+  }
+  const delay = flags[`${prefix}delay`];
+  if (delay !== undefined) {
+    const ms = typeof delay === "string" ? Number(delay) : Number.NaN;
+    if (!Number.isInteger(ms) || ms < 0)
+      throw new Failure(
+        `--${prefix}delay needs milliseconds, got ${String(delay)}.`,
+        "Example: 3000; 0 answers at once.",
+      );
+    change.delayMs = ms;
+  }
+  return change;
+}
+
+/**
+ * Applies `change` to the instance's fake gh, which reads its state file on every call, and returns how it
+ * answers now and how many calls it has logged.
+ */
+async function fakeGh(instance: Instance, change: GhChange = {}) {
+  const statePath = instance.env[GH_STATE_ENV];
+  const callsPath = instance.env[GH_LOG_ENV];
+  if (!statePath || !callsPath || !existsSync(statePath))
+    throw new Failure(
+      `Instance ${instance.name} has no fake gh.`,
+      `Recreate it: bun ${self} down --name ${instance.name} --purge, then up again.`,
+    );
+  const state = JSON.parse(await readFile(statePath, "utf8")) as GhState;
+  if (change.mode !== undefined || change.delayMs !== undefined) {
+    if (change.mode !== undefined) state.mode = change.mode;
+    if (change.delayMs === 0) delete state.delayMs;
+    else if (change.delayMs !== undefined) state.delayMs = change.delayMs;
+    const temporary = `${statePath}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(state, null, 2));
+    await rename(temporary, statePath);
+  }
+  const calls = existsSync(callsPath)
+    ? (await readFile(callsPath, "utf8")).split("\n").filter(Boolean).length
+    : 0;
+  return { mode: state.mode, delayMs: state.delayMs ?? 0, calls, statePath, callsPath };
+}
+
+async function gh(flags: Record<string, string | true>) {
+  const name = nameFrom(flags);
+  const instance = await requireInstance(name);
+  return { name, ...(await fakeGh(instance, ghChangeFrom(flags, ""))) };
 }
 
 async function startApp(instance: Instance): Promise<void> {
@@ -452,6 +590,7 @@ async function up(flags: Record<string, string | true>) {
     typeof flags["app-args"] === "string"
       ? flags["app-args"].split(/\s+/).filter((word) => word !== "")
       : undefined;
+  const ghChange = ghChangeFrom(flags, "gh-");
   const variant: Variant = variantFlag ?? instance?.variant ?? "wide";
   let seeded = false;
   if (!instance) {
@@ -485,6 +624,8 @@ async function up(flags: Record<string, string | true>) {
     await saveInstance(instance);
     await log(name, { event: "seeded", ms: Date.now() - started, rows: seededWorld.rows.length });
   }
+  // Before the app starts, so its first scan meets the fake as asked.
+  const fake = await fakeGh(instance, ghChange);
   const info = paneInfo(instance.socket);
   let reused = false;
   let resized = false;
@@ -526,6 +667,7 @@ async function up(flags: Record<string, string | true>) {
     resized,
     variant,
     appArgs: instance.appArgs ?? [],
+    gh: { mode: fake.mode, delayMs: fake.delayMs },
     size,
     branch: instance.branch,
     header: ready.header,
@@ -585,6 +727,9 @@ async function env(flags: Record<string, string | true>) {
       worktrees: join(instance.sandbox, "worktrees"),
       removalsLog: join(instance.env.HOME!, ".cache", "wt-dash", "removals.log"),
       sizes: join(instance.env.HOME!, ".cache", "wt-dash", "sizes.json"),
+      pullRequests: join(instance.env.HOME!, ".cache", "wt-dash", "pull-requests.json"),
+      ghState: instance.env[GH_STATE_ENV],
+      ghCalls: instance.env[GH_LOG_ENV],
       appLog: p.appLog,
       evidence: p.evidence,
     },
@@ -1074,7 +1219,8 @@ async function list() {
 }
 
 const COMMANDS = {
-  up: "up --name <n> [--variant wide|narrow] [--seed <file>] [--app-args='<args>']  Seed if new, start wt-dash in tmux, wait until listed. Reuses a running instance (resizing it to the variant). --seed builds the sandbox with a module's default export (SeedModule) instead of the test fixture's seed. --app-args adds space-separated arguments after the scan root, such as --app-args='--depth 0'; join the value with = when it starts with --. A stopped instance restarts with the last ones; a running one with other arguments is refused.",
+  up: "up --name <n> [--variant wide|narrow] [--seed <file>] [--app-args='<args>'] [--gh-mode <mode>] [--gh-delay <ms>]  Seed if new, start wt-dash in tmux, wait until listed. Reuses a running instance (resizing it to the variant). --seed builds the sandbox with a module's default export (SeedModule) instead of the test fixture's seed. --app-args adds space-separated arguments after the scan root, such as --app-args='--depth 0'; join the value with = when it starts with --. A stopped instance restarts with the last ones; a running one with other arguments is refused. --gh-mode and --gh-delay set the fake gh as the gh command does, before the app starts.",
+  gh: "gh --name <n> [--mode ok|signed-out|bad-credentials|offline|missing-repo] [--delay <ms>]  Set how the instance's fake gh answers from its next call (--delay 0 answers at once); prints its mode, delay and how many calls it has logged.",
   env: "env --name <n> [--full]  The shell preamble, tmux commands and paths to drive the instance; --full adds its env and the seeded rows with their expected verdicts.",
   doctor: "doctor --name <n>  Read-only health check.",
   state:
@@ -1101,6 +1247,7 @@ async function main(): Promise<void> {
     doctor,
     state,
     image,
+    gh,
     down,
     list,
   };
